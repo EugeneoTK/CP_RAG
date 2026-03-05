@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CP RAG - Care Protocol Assistant</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f4f8;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      background: #1a56db;
+      color: #fff;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    header p { font-size: 0.8rem; opacity: 0.8; }
+
+    #status-badge {
+      margin-left: auto;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 500;
+      background: rgba(255,255,255,0.15);
+    }
+    #status-badge.ready { background: #16a34a; }
+    #status-badge.not-ready { background: #dc2626; }
+
+    main {
+      width: 100%;
+      max-width: 800px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0 16px;
+    }
+
+    #chat-window {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      line-height: 1.55;
+      font-size: 0.9rem;
+      word-wrap: break-word;
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: #1a56db;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg.bot {
+      align-self: flex-start;
+      background: #fff;
+      color: #1e293b;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .msg.bot .sources {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 0.78rem;
+      color: #64748b;
+    }
+
+    .msg.bot .sources a {
+      display: block;
+      color: #1a56db;
+      text-decoration: none;
+      word-break: break-all;
+      margin-top: 2px;
+    }
+
+    .msg.bot .sources a:hover { text-decoration: underline; }
+
+    .msg.loading span {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+      animation: bounce 1.2s infinite;
+      margin: 0 2px;
+    }
+    .msg.loading span:nth-child(2) { animation-delay: 0.2s; }
+    .msg.loading span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-6px); }
+    }
+
+    #input-area {
+      padding: 12px 0 20px;
+      display: flex;
+      gap: 10px;
+    }
+
+    #question {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      outline: none;
+      resize: none;
+      height: 48px;
+      max-height: 160px;
+      overflow-y: auto;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+
+    #question:focus { border-color: #1a56db; }
+
+    button {
+      padding: 12px 20px;
+      background: #1a56db;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+
+    button:hover:not(:disabled) { background: #1546b8; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #ingest-bar {
+      background: #fef9c3;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      padding: 10px 16px;
+      font-size: 0.83rem;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+
+    #ingest-bar button {
+      background: #d97706;
+      font-size: 0.8rem;
+      padding: 6px 14px;
+      border-radius: 8px;
+    }
+
+    #ingest-bar button:hover:not(:disabled) { background: #b45309; }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      text-align: center;
+      gap: 8px;
+    }
+
+    .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
+    .empty-state p { font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Care Protocol Assistant</h1>
+    <p>Powered by HSG Primary Care Pages</p>
+  </div>
+  <span id="status-badge">Checking...</span>
+</header>
+
+<main>
+  <div id="ingest-bar" style="display:none">
+    Knowledge base not found. Run ingestion to scrape and index the care protocols.
+    <button id="ingest-btn" onclick="runIngest()">Run Ingestion</button>
+  </div>
+
+  <div id="chat-window">
+    <div class="empty-state" id="empty-state">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 01-4-.833L3 20l1.167-4A8.002 8.002 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+      </svg>
+      <p>Ask a question about Singapore's chronic care protocols.</p>
+    </div>
+  </div>
+
+  <div id="input-area">
+    <textarea id="question" placeholder="Ask about care protocols..." rows="1"
+      onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+    <button id="send-btn" onclick="sendMessage()">Send</button>
+  </div>
+</main>
+
+<script>
+  const chatWindow = document.getElementById('chat-window');
+  const questionInput = document.getElementById('question');
+  const sendBtn = document.getElementById('send-btn');
+  const statusBadge = document.getElementById('status-badge');
+  const ingestBar = document.getElementById('ingest-bar');
+  const emptyState = document.getElementById('empty-state');
+  const ingestBtn = document.getElementById('ingest-btn');
+
+  async function checkStatus() {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      if (data.ready) {
+        statusBadge.textContent = 'Ready';
+        statusBadge.className = 'ready';
+        ingestBar.style.display = 'none';
+        sendBtn.disabled = false;
+        questionInput.disabled = false;
+      } else {
+        statusBadge.textContent = 'Not ready';
+        statusBadge.className = 'not-ready';
+        ingestBar.style.display = 'flex';
+        sendBtn.disabled = true;
+        questionInput.disabled = true;
+      }
+    } catch {
+      statusBadge.textContent = 'Offline';
+      statusBadge.className = 'not-ready';
+    }
+  }
+
+  function addMessage(role, content, sources) {
+    emptyState && emptyState.remove();
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.innerHTML = content;
+    if (sources && sources.length) {
+      const s = document.createElement('div');
+      s.className = 'sources';
+      s.innerHTML = '<strong>Sources:</strong>' + sources.map(
+        u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`
+      ).join('');
+      div.appendChild(s);
+    }
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return div;
+  }
+
+  async function sendMessage() {
+    const question = questionInput.value.trim();
+    if (!question) return;
+
+    addMessage('user', escapeHtml(question));
+    questionInput.value = '';
+    autoResize(questionInput);
+
+    sendBtn.disabled = true;
+    const loading = document.createElement('div');
+    loading.className = 'msg bot loading';
+    loading.innerHTML = '<span></span><span></span><span></span>';
+    chatWindow.appendChild(loading);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      loading.remove();
+      if (res.ok) {
+        addMessage('bot', escapeHtml(data.answer), data.sources);
+      } else {
+        addMessage('bot', `Error: ${data.detail || 'Unknown error'}`);
+      }
+    } catch (e) {
+      loading.remove();
+      addMessage('bot', 'Network error. Is the server running?');
+    } finally {
+      sendBtn.disabled = false;
+      questionInput.focus();
+    }
+  }
+
+  async function runIngest() {
+    ingestBtn.disabled = true;
+    ingestBtn.textContent = 'Ingesting...';
+    try {
+      const res = await fetch('/api/ingest', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        ingestBtn.textContent = `Done (${data.chunks} chunks)`;
+        await checkStatus();
+      } else {
+        ingestBtn.textContent = 'Failed';
+        ingestBtn.disabled = false;
+      }
+    } catch {
+      ingestBtn.textContent = 'Error';
+      ingestBtn.disabled = false;
+    }
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+  }
+
+  checkStatus();
+</script>
+</body>
+</html>
