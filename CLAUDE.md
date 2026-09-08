@@ -1,6 +1,6 @@
 # CLAUDE.md — CP_RAG
 
-RAG chat app over Primary Care SG chronic-care care protocols + MOH public health guidance (Phase 2). FastAPI serves a single-page UI (`static/index.html`); `rag.py` scrapes the source sites (`SOURCES`), embeds chunks into a persisted Chroma store, and answers via `nvidia/nemotron-3.5-lightning:free` (free tier) routed through **OpenRouter** (OpenAI-compatible gateway; provider + models are env-configured, see `.env.example`). The RAG prompt has three labelled sections — *Protocol content* / *Public health guidance* / *Local context* (live snapshot, provenance rules in `docs/signal-research.md` §12–13).
+RAG chat app over Primary Care SG chronic-care care protocols + MOH public health guidance (Phase 2). FastAPI serves a single-page UI (`static/index.html`); `rag.py` scrapes the source sites (`SOURCES`), embeds chunks into a persisted Chroma store, and answers via `deepseek/deepseek-v4-flash-0731` (paid, fast) routed through **OpenRouter** (OpenAI-compatible gateway; provider + models are env-configured, see `.env.example`). The RAG prompt has three labelled sections — *Protocol content* / *Public health guidance* / *Local context* (live snapshot, provenance rules in `docs/signal-research.md` §12–13).
 
 Read this file at the start of every session. Make **one focused change per session**, verify it boots (see Commands), then stop and let me commit.
 
@@ -15,7 +15,7 @@ Read this file at the start of every session. Make **one focused change per sess
 ## Stack (decided — don't re-litigate)
 
 - **FastAPI** + **uvicorn** (async endpoints, `lifespan` builds the RAG chain at startup if `chroma_db/` exists).
-- **LangChain 0.3.x** (`langchain-community`, `langchain-openai`) — chain: retriever (k=5) + `ChatPromptTemplate` + chat model (env `CHAT_MODEL`, currently `nvidia/nemotron-3.5-lightning:free` via OpenRouter, temperature 0).
+- **LangChain 0.3.x** (`langchain-community`, `langchain-openai`) — chain: retriever (k=5) + `ChatPromptTemplate` + chat model (env `CHAT_MODEL`, currently `deepseek/deepseek-v4-flash-0731` via OpenRouter, temperature 0).
 - **Chroma** persisted at `./chroma_db`, embeddings `text-embedding-ada-002` (env `EMBED_MODEL`; currently served via OpenRouter). Changing the embedding model invalidates the index — re-ingest.
 - **BeautifulSoup** text extraction, chunking 1000/200.
 - UI is one static HTML file talking to five JSON endpoints. No build step, no framework.
@@ -41,16 +41,16 @@ CP_RAG/
 ## Conventions
 
 - All config via env; `.env.example` stays current. No secrets in code or logs.
-- Keep endpoints small and synchronous-call-through (the LLM call is the work; no background jobs needed yet).
+- Keep endpoints small. Long blocking work (the LLM call in `/api/chat`, the ingest crawls) runs in a thread-pool executor — never call blocking chain/ingest code directly in an `async def` endpoint, or the event loop freezes and the whole server stops responding (no background jobs needed yet).
 - No test suite exists. The standing check is: server boots, `/api/status` returns `{"ready": true}`, and `/` serves 200.
 
 ## Commands (keep these working)
 
-- `venv/bin/uvicorn app:app --port 8000` — run the app, then open http://localhost:8000
-- `curl -s localhost:8000/api/status` — free readiness check (run this, not chat, when verifying a change)
-- `curl -s localhost:8000/api/context` — live snapshot (15-min cache; first hit builds, ~15–40 s, key-free)
-- `curl -X POST localhost:8000/api/ingest` — rebuild the knowledge base (**costs API credits; fresh directories only**)
-- `curl -X POST localhost:8000/api/ingest/append` — append-only ingest: embeds only sources not in the store (host-level skip + 500-chunk cap); cheap and idempotent
+- `venv/bin/uvicorn app:app --port 5001` (or `python app.py`, same default) — run the app, then open http://localhost:5001
+- `curl -s localhost:5001/api/status` — free readiness check (run this, not chat, when verifying a change)
+- `curl -s localhost:5001/api/context` — live snapshot (15-min cache; first hit builds, ~15–40 s, key-free)
+- `curl -X POST localhost:5001/api/ingest` — rebuild the knowledge base (**costs API credits; fresh directories only**)
+- `curl -X POST localhost:5001/api/ingest/append` — append-only ingest: embeds only sources not in the store (host-level skip + 500-chunk cap); cheap and idempotent
 - `venv/bin/python -m pip install -r requirements.txt` — (re)install deps
 
 ## Not now (scope guard)

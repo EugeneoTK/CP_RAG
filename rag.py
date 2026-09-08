@@ -157,6 +157,8 @@ PROMPT_TEMPLATE = """Answer the question using only the three sections below. If
 - "Public health guidance": government public health guidance (e.g. MOH). You may cite it, but as public guidance — never as protocol content.
 - "Local context": live population-level signals (air quality, weather, dengue) for the clinic point. These are observations about the area right now, NOT protocol content: use them to frame the answer (environmental triggers, sick-day rules, counselling), but never attribute them to the protocols.
 
+Formatting: the answer renders as PLAIN TEXT in a chat window — it has NO markdown support. Never use **bold**, *italic*, # headings, or backticks; write plain words only. Simple dash bullets and a blank line between sections are fine.
+
 == Protocol content ==
 {protocol_content}
 
@@ -299,7 +301,11 @@ def build_chain(vectorstore: Chroma, context_provider=None):
     """context_provider: callable() -> snapshot dict or None. app.py serves it
     from the same 15-min cache as GET /api/context; the chat path never blocks
     on a build (a cold cache degrades the prompt to 'context unavailable')."""
-    llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL, temperature=0)
+    # Bounded provider calls: the free tier is slow and 429-prone; without
+    # explicit caps a hung request would sit for ~30 min (openai client
+    # defaults: 600 s/attempt x 3 tries) before surfacing as an error.
+    llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL,
+                     temperature=0, timeout=300, max_retries=1)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     answer_chain = prompt | llm | StrOutputParser()

@@ -67,6 +67,7 @@
       line-height: 1.55;
       font-size: 0.9rem;
       word-wrap: break-word;
+      white-space: pre-wrap; /* answers are plain text — keep the model's line breaks */
     }
 
     .msg.user {
@@ -112,6 +113,12 @@
     }
     .msg.loading span:nth-child(2) { animation-delay: 0.2s; }
     .msg.loading span:nth-child(3) { animation-delay: 0.4s; }
+
+    .msg.loading .loading-hint {
+      margin-top: 8px;
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
 
     @keyframes bounce {
       0%, 60%, 100% { transform: translateY(0); }
@@ -450,6 +457,15 @@
     const loading = document.createElement('div');
     loading.className = 'msg bot loading';
     loading.innerHTML = '<span></span><span></span><span></span>';
+    const hint = document.createElement('div');
+    hint.className = 'loading-hint';
+    hint.textContent = 'Thinking… (free-tier model: can take a few minutes)';
+    loading.appendChild(hint);
+    const t0 = Date.now();
+    const hintTimer = setInterval(() => {
+      hint.textContent = 'Thinking… ' + Math.floor((Date.now() - t0) / 1000) +
+        's — free-tier model, can take a few minutes';
+    }, 1000);
     chatWindow.appendChild(loading);
     chatWindow.scrollTop = chatWindow.scrollHeight;
 
@@ -470,6 +486,7 @@
       loading.remove();
       addMessage('bot', 'Network error. Is the server running?');
     } finally {
+      clearInterval(hintTimer);
       sendBtn.disabled = false;
       questionInput.focus();
     }
@@ -686,6 +703,9 @@
   checkStatus();
   refreshContext();
   setInterval(refreshContext, CTX_REFRESH_MS);
+  // Re-poll status while not ready (e.g. server restarted mid-session):
+  // without this, a failed first probe leaves the send button disabled.
+  setInterval(() => { if (statusBadge.className !== 'ready') checkStatus(); }, 10000);
 </script>
 </body>
 </html>

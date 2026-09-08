@@ -104,7 +104,16 @@ async def chat(req: ChatRequest):
             status_code=503,
             detail="Knowledge base not ready. POST /api/ingest first.",
         )
-    result = rag_chain.invoke(req.question)
+    # rag_chain.invoke() is blocking (retrieval + synchronous LLM HTTP,
+    # minutes on the free tier). Run it off the event loop so /,
+    # /api/status and /api/context keep answering while a chat is in
+    # flight — calling it directly froze the whole server (every other
+    # request queued behind the LLM call with no response).
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, rag_chain.invoke, req.question)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="LLM request failed: %s" % e)
     sources = list({doc.metadata.get("source", "") for doc in result["context"]})
     return ChatResponse(answer=result["answer"], sources=sources)
 
@@ -112,7 +121,8 @@ async def chat(req: ChatRequest):
 @app.post("/api/ingest")
 async def run_ingest():
     global rag_chain
-    chunks = ingest()
+    # Full crawl + embed is long and blocking — keep the loop responsive.
+    chunks = await asyncio.get_running_loop().run_in_executor(None, ingest)
     vectorstore = load_vectorstore()
     rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
     return {"status": "ok", "chunks": chunks}
@@ -124,7 +134,8 @@ async def run_ingest_append():
     store yet (never re-embeds the existing corpus). Rebuilds the chain so
     the retriever picks up the new chunks."""
     global rag_chain
-    new_chunks, sources_added, sources_skipped = ingest_append()
+    new_chunks, sources_added, sources_skipped = (
+        await asyncio.get_running_loop().run_in_executor(None, ingest_append))
     vectorstore = load_vectorstore()
     rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
     return {"status": "ok", "new_chunks": new_chunks,
@@ -195,3 +206,10 @@ async def get_context(lat: float = None, lon: float = None,
     _context_cache[key] = (time.monotonic(), snap)
     return JSONResponse(snap, headers={
         "X-Snapshot-Cache": "miss", "X-Snapshot-Age": "0"})
+
+
+if __name__ == "__main__":
+    # `python app.py` used to import and exit silently — always give it a
+    # server to run (was HANDOFF outstanding #6). PORT env overrides 5001.
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT", "5001")))
