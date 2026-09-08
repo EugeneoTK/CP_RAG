@@ -250,6 +250,69 @@ def ingest_append(max_new_chunks: int = 500):
     return len(new), added, skipped
 
 
+# Phase 5: clinical-guideline PDFs (ACE ACGs + manual uploads) route to the
+# "Clinical guidelines" prompt section — never presented as protocol content.
+GUIDELINE_SITES = {"ace-hta.gov.sg", "guideline-upload"}
+
+
+def _store_pdf_index(vectorstore: Chroma):
+    """(doc_hash set, normalized source-URL set) already in the store
+    (local read, 0 credits) — dedupe for PDF ingest."""
+    hashes, urls = set(), set()
+    for m in vectorstore.get(include=["metadatas"]).get("metadatas") or []:
+        m = m or {}
+        if m.get("doc_hash"):
+            hashes.add(m["doc_hash"])
+        u = m.get("source")
+        if u:
+            urls.add(_norm_url(u))
+    return hashes, urls
+
+
+def ingest_pdf(data: bytes, title: str, source: str = "",
+               source_site: str = "guideline-upload"):
+    """Parse + chunk + embed + append one PDF. Dedupes by sha256 of the file
+    bytes (and by source URL when given), so re-ingests cost 0 credits.
+
+    Returns (chunks_added, skipped, doc_hash). Raises ValueError when the
+    PDF has no extractable text (scanned image / password-protected).
+    """
+    text = pdf_text(data)
+    if not text.strip():
+        raise ValueError("no extractable text in PDF (scanned image?)")
+    doc_hash = hashlib.sha256(data).hexdigest()[:16]
+    vectorstore = load_vectorstore()
+    have_hashes, have_urls = _store_pdf_index(vectorstore)
+    src = source or "upload:%s" % title
+    if doc_hash in have_hashes or _norm_url(src) in have_urls:
+        return 0, True, doc_hash
+    doc = Document(
+        page_content=text,
+        metadata={"source": src, "source_site": source_site,
+                  "doc_title": title, "doc_hash": doc_hash},
+    )
+    splits = _split([doc])
+    vectorstore.add_documents(splits)
+    return len(splits), False, doc_hash
+
+
+def list_pdfs():
+    """One row per ingested PDF: doc_hash, title, source, chunks."""
+    vectorstore = load_vectorstore()
+    agg = {}
+    for m in vectorstore.get(include=["metadatas"]).get("metadatas") or []:
+        m = m or {}
+        if not m.get("doc_hash"):
+            continue
+        e = agg.setdefault(m["doc_hash"], {
+            "title": m.get("doc_title", "?"),
+            "source": m.get("source", ""),
+            "chunks": 0})
+        e["chunks"] += 1
+    return [{"doc_hash": k, "title": v["title"], "source": v["source"],
+             "chunks": v["chunks"]} for k, v in agg.items()]
+
+
 def _active_protocol_names(context_provider) -> list:
     """Mechanism B: protocol names engaged by the active live links."""
     if not context_provider:
