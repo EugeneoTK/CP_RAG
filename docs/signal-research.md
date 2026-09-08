@@ -205,7 +205,7 @@ GET .../weather/flood-alerts                # 200, PUB flood alert event feed
 | 3 — WIDB | PDF table parser → `disease_week` block in snapshot | 0 credits |
 
 (Phases 0, 2, 5 as above; **Phase 3 — WIDB: DONE 2026-09-08** — `context/widb.py`: archive crawl → walk-back PDF fetch → pypdf parser → `disease_week` block; WIDB line in *Local context*; CLI `DISEASE` section; UI chip + card. Build notes in §14.)
-| 4 — URA (optional) | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) | 0 credits |
+| 4 — URA | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) — **DONE 2026-09-08** (`context/ura.py`: daily token → `Planning_Decision&last_dnload_date=<today−90d>`; healthcare keyword filter on `submission_desc`; 24 h disk cache; `catchment_change` snapshot block = island-wide healthcare-related written permissions, latest 20, each with `decision_type` — NOT opened facilities; *Local context* prompt line; CLI `PLANNING` section; UI chip + card; no key → `ura:` data gap). Sketch deviation: `new_resi_units_approved_region` dropped (no units field in the service; regional aggregation needs OneMap geocoding — deferred, §15) | 0 credits |
 | 5 — ACE guidelines | Clinical-guidelines PDFs in the RAG corpus: `pypdf` extraction, append-only `ingest_pdf()` with hash dedupe, `POST /api/ingest-pdf` + `GET /api/pdfs`, 4th prompt section "Clinical guidelines", UI upload bar, optional `scripts/ace_guidelines.py` sitemap crawler for all 29 ACE ACGs. Plan: `docs/superpowers/plans/2026-09-08-ace-guidelines-pdf.md` — **DONE 2026-09-08** (manual-upload path + full seed: 96 guideline PDFs / 2,975 guideline chunks in the store; 1 scanned appendix uningested) | ~1–2 credits (upload path) / a few cents (full ACE seed) |
 
 ## 10. URA e-Services API — `eservice.ura.gov.sg` (access key VERIFIED 2026-09-08)
@@ -243,6 +243,17 @@ HOME, CHILD CARE, SENIOR) and count new residential units per region → snapsho
 Caveats: (1) a planning decision is a *permission*, not an opened facility; (2) rows carry street
 addresses, no postal code/region — mapping to a clinic catchment needs geocoding (OneMap
 Geocoding API is free) or address→region text matching; (3) ~1k rows/week — trivial to store.
+
+**v1 scope ruling (2026-09-08, Phase 4 build).** The sketch's
+`new_resi_units_approved_region` is not derivable from this service: rows
+carry no unit counts, and `address` is a street address with no
+postcode/region, so regional aggregation requires geocoding (OneMap's free
+API needs its own key) or a street→region table — both deferred. v1 ships
+`healthcare_decisions_90d` (island-wide; granted AND rejected, each with
+`decision_type` — the sketch's `healthcare_approvals_90d` refined, since
+the service returns both and the type is only observable live). Catchment
+mapping (caveat 2) is the named follow-up if per-clinic distance filtering
+is wanted.
 
 Sequencing keeps every phase shippable and credit-free until Phase 2.
 
@@ -479,4 +490,42 @@ against the PDFs; live `fetch_latest()` → EW34; cache hit on second call;
 walk-back + all-fail paths exercised with a monkeypatched `get_bytes`
 (deterministic, `/tmp/widb_fallback_test.py`); `/api/context` returns
 `disease_week` with `data_gaps: []`; `/api/status` → `ready:true`.
+
+## 15. Phase 4 build notes (URA planning decisions, 2026-09-08)
+
+`context/ura.py` (stdlib, Phase 3 pattern): `get_token()` —
+`insertNewToken/v1` with `AccessKey` header, daily token from
+`{"Result": ...}`; `fetch_rows()` — `invokeUraDS/v1?service=Planning_Decision&last_dnload_date=dd/mm/yyyy`
+(today − 90 d; the API max lookback is 1 year and `year=` is all-year —
+the 90-day window keeps the payload small, ~2–3k rows) with `AccessKey` +
+`Token` headers; `filter_healthcare()` — case-insensitive keyword match on
+`submission_desc` (POLYCLINIC, CLINIC, MEDICAL, NURSING HOME, CHILD CARE,
+SENIOR), `delete_ind == 'Yes'` rows dropped, newest `decision_date`
+(dd/mm/yyyy → ISO) first; `fetch_catchment()` — 24 h disk cache
+(`$TMPDIR/cp_rag_context_cache/ura_planning.json`; data cadence is daily
+and the token is daily, so one refetch/day is enough) and the
+`(payload, error)` contract. No `URA_ACCESS_KEY` in `.env` →
+`ura: URA_ACCESS_KEY not set in .env (Phase 4 signal disabled)` in
+`data_gaps` — the signal degrades exactly like every other source, and
+the prompt/UI say nothing about planning.
+
+Payload (`catchment_change`): `source`, `window`, `rows_scanned`,
+`healthcare_decisions_90d_count` (full count), `healthcare_decisions_90d`
+(latest 20: `address/what/date/decision_type/decision_no`), `caveat`.
+Provenance: *Local context* only — the prompt line, CLI header, and UI
+card all state a written permission is NOT an opened facility.
+
+Verified (monkeypatched transport, 0 URA network): filter/sort/delete-skip,
+cache-hit no-refetch, no-key gap, token-HTTP-failure and bad-Status error
+paths (`/tmp/verify_ura_task1.py`); prompt line renders with the caveat,
+absent block adds nothing (`/tmp/verify_ura_task2.py`); no-key CLI shows
+the gap and no `PLANNING` section; seeded-cache CLI shows the section;
+live `/api/context` → `ura:` gap only, no crash. Live API verification
+pending `URA_ACCESS_KEY` in `.env` (plan Appendix A:
+`docs/superpowers/plans/2026-09-08-ura-planning-decisions.md`).
+
+Follow-ups (not built): catchment geocoding of `address` (OneMap free key
+or street→region table) for per-clinic distance; residential-unit counts
+(URA's separate `Private_Residential_Properties` services, if the signal
+warrants them); rejected-vs-approved split chip in the UI.
 
