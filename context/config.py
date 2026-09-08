@@ -29,6 +29,16 @@ WIDB_UA = {
 WIDB_MAX_LOOKBACK = 5      # walk back at most N epi-weeks to find a parseable PDF
 WIDB_CACHE_TTL_SECONDS = 3 * 24 * 3600  # weekly publication cadence
 
+# --- URA e-Services (Phase 4 — planning decisions) ---------------------------------
+# Auth: AccessKey header -> daily token (insertNewToken/v1) -> data calls carry
+# AccessKey + Token headers (invokeUraDS/v1). Docs: eservice.ura.gov.sg/maps/api/.
+URA_BASE = "https://eservice.ura.gov.sg/uraDataService"
+URA_WINDOW_DAYS = 90             # last_dnload_date window (API max lookback: 1 year)
+URA_CACHE_TTL_SECONDS = 24 * 3600  # data cadence is daily; token valid for the day
+URA_MAX_ITEMS = 20               # snapshot cap on the decision list (count stays full)
+URA_HEALTHCARE_KEYWORDS = ("POLYCLINIC", "CLINIC", "MEDICAL", "NURSING HOME",
+                           "CHILD CARE", "SENIOR")
+
 # --- GEOJSON via v1 poll-download (key-free) -------------------------------------
 V1_POLL = "https://api-open.data.gov.sg/v1/public/api/datasets/{did}/poll-download"
 GEOJSON_DATASETS = {
@@ -55,6 +65,22 @@ def _load_key():
     return os.environ.get("DGS_API_KEY") or None
 
 DGS_API_KEY = _load_key()
+
+
+def _load_ura_key():
+    try:
+        env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        if os.path.exists(env):
+            for line in open(env):
+                line = line.strip()
+                if line.startswith("URA_ACCESS_KEY="):
+                    return line.split("=", 1)[1].strip() or None
+    except OSError:
+        pass
+    return os.environ.get("URA_ACCESS_KEY") or None
+
+
+URA_ACCESS_KEY = _load_ura_key()
 
 # --- test clinic: real polycline point from d_b22489c7 (verified 2026-09-08) -------
 TEST_CLINIC = {
