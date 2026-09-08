@@ -25,7 +25,7 @@ def main(argv=None):
     ap.add_argument("--name", default=None, help="clinic name label")
     ap.add_argument("--json", action="store_true", help="emit raw JSON only")
     ap.add_argument("--no-cache", action="store_true",
-                    help="refetch GEOJSON layers and the WIDB bulletin")
+                    help="refetch GEOJSON layers, the WIDB bulletin and the URA planning window")
     args = ap.parse_args(argv)
 
     if args.lat is not None and args.lon is not None:
@@ -114,6 +114,18 @@ def main(argv=None):
               % (dw["epi_week"], dw.get("date_range") or "?"))
         for n in dw.get("notable") or []:
             print("         - " + n)
+
+    cc = snap.get("catchment_change") or {}
+    if cc.get("healthcare_decisions_90d_count") is not None:
+        print("PLANNING URA written permissions %s: %d healthcare-related (of %d rows)"
+              % (cc.get("window") or "?", cc["healthcare_decisions_90d_count"],
+                 cc.get("rows_scanned", 0)))
+        for a in cc.get("healthcare_decisions_90d") or []:
+            print("         - %s: %s — %s [%s]"
+                  % (a.get("date") or "?", a.get("address") or "?",
+                     (a.get("what") or "?")[:70], a.get("decision_type") or "?"))
+        if not cc.get("healthcare_decisions_90d"):
+            print("         - none in window")
 
     if "nearest_services" in snap:
         for p in snap["nearest_services"]["polyclinics"]:

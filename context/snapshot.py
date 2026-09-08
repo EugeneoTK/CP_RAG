@@ -8,7 +8,7 @@ it lands in data_gaps so the snapshot is always emitted.
 import datetime
 import time
 
-from . import config, fetchers, widb
+from . import config, fetchers, ura, widb
 from .geo import haversine_km, point_in_polygon
 from .linkage import PROTOCOLS, build_protocol_links
 
@@ -181,6 +181,14 @@ def build_snapshot(lat, lon, name, use_cache=True):
         gaps.append("widb: %s" % widb_err)
     else:
         snap["disease_week"] = widb_val
+
+    # --- URA planning decisions (catchment_change, Phase 4; needs URA_ACCESS_KEY) -------
+    time.sleep(2)
+    cc, cc_err = ura.fetch_catchment(use_cache)
+    if cc_err:
+        gaps.append("ura: %s" % cc_err)
+    else:
+        snap["catchment_change"] = cc
 
     # --- nearest polyclines (service availability) -------------------------------------
     pcs, err = _nearest_polyclinics(lat, lon)

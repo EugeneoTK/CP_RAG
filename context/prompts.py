@@ -51,6 +51,25 @@ def format_live_context(snapshot):
             dw["epi_week"], dw.get("date_range") or "?")
         line += "; ".join(dw.get("notable") or ["table parsed, no narrative fields"])
         local_lines = signal_lines + [line]
+
+    # URA (Phase 4): island-wide planning-decision signal — baseline context,
+    # same treatment as WIDB; a written permission is explicitly NOT an
+    # opened facility, so the line says so.
+    cc = snapshot.get("catchment_change") or {}
+    if cc.get("healthcare_decisions_90d_count"):
+        examples = "; ".join(
+            "%s %s — %s%s" % (
+                a.get("date") or "?", a.get("address") or "?",
+                (a.get("what") or "?")[:80],
+                (" [" + a["decision_type"] + "]") if a.get("decision_type") else "")
+            for a in (cc.get("healthcare_decisions_90d") or [])[:3])
+        local_lines = local_lines + [
+            "- URA planning decisions %s (island-wide written permissions, "
+            "NOT protocol content): %d healthcare-related, e.g. %s. A written "
+            "permission is NOT an opened facility — never present one as an "
+            "existing service." % (
+                cc.get("window") or "last 90 days",
+                cc["healthcare_decisions_90d_count"], examples)]
     local = (
         "Live population-level signals (NEA / data.gov.sg / CDA) — observations "
         "about the area right now, NOT protocol content; never present them "
