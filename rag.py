@@ -1,7 +1,10 @@
 import os
+import hashlib
+import io
 import requests
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
 from langchain_community.document_loaders import RecursiveUrlLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -16,6 +19,27 @@ from langchain_core.prompts import ChatPromptTemplate
 from context.prompts import format_live_context
 
 CHROMA_DIR = "./chroma_db"
+
+MAX_PDF_BYTES = 25 * 1024 * 1024  # guideline PDFs run 1-10 MB; bounded upload cap
+
+
+def pdf_text(data: bytes) -> str:
+    """Extract readable text from a PDF, one labelled block per page.
+
+    Raises ValueError for password-protected PDFs. Returns "" when the
+    PDF has no text layer (scanned image) — caller treats that as a
+    reject.
+    """
+    reader = PdfReader(io.BytesIO(data))
+    if reader.is_encrypted:
+        if not reader.decrypt(""):
+            raise ValueError("PDF is password-protected")
+    blocks = []
+    for i, page in enumerate(reader.pages, start=1):
+        t = (page.extract_text() or "").strip()
+        if t:
+            blocks.append("[page %d]\n%s" % (i, t))
+    return "\n\n".join(blocks)
 
 # LLM provider — OpenAI-compatible. Defaults to api.openai.com; point
 # OPENAI_BASE_URL at a gateway (e.g. https://openrouter.ai/api/v1) to use one.
