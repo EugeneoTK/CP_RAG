@@ -11,6 +11,17 @@ from bs4 import BeautifulSoup
 CHROMA_DIR = "./chroma_db"
 SOURCE_URL = "https://www.primarycarepages.sg/healthier-sg/care-protocols/chronic-care-protocols/"
 
+# LLM provider — OpenAI-compatible. Defaults to api.openai.com; point
+# OPENAI_BASE_URL at a gateway (e.g. https://openrouter.ai/api/v1) to use one.
+# Model ids must match the provider's namespace (OpenRouter: "openai/gpt-4o").
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-ada-002")
+
+
+def _embeddings() -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(model=EMBED_MODEL, openai_api_base=OPENAI_BASE_URL)
+
 PROMPT_TEMPLATE = """Answer the question based only on the following context.
 If you don't know, say you don't know.
 
@@ -29,7 +40,7 @@ def _build_vectorstore() -> Chroma:
     docs = loader.load()
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = splitter.split_documents(docs)
-    embeddings = OpenAIEmbeddings()
+    embeddings = _embeddings()
     vectorstore = Chroma.from_documents(
         documents=splits,
         embedding=embeddings,
@@ -39,7 +50,7 @@ def _build_vectorstore() -> Chroma:
 
 
 def load_vectorstore() -> Chroma:
-    embeddings = OpenAIEmbeddings()
+    embeddings = _embeddings()
     return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
 
 
@@ -53,7 +64,7 @@ def ingest() -> int:
     docs = loader.load()
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = splitter.split_documents(docs)
-    embeddings = OpenAIEmbeddings()
+    embeddings = _embeddings()
     Chroma.from_documents(
         documents=splits,
         embedding=embeddings,
@@ -63,7 +74,7 @@ def ingest() -> int:
 
 
 def build_chain(vectorstore: Chroma):
-    llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL, temperature=0)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     answer_chain = prompt | llm | StrOutputParser()
