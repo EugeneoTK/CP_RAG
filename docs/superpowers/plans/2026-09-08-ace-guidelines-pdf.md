@@ -573,6 +573,7 @@ import argparse
 import re
 import time
 import xml.etree.ElementTree as ET
+from urllib.parse import quote, urlsplit
 
 import requests
 from bs4 import BeautifulSoup

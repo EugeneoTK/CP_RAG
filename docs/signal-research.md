@@ -204,6 +204,7 @@ GET .../weather/flood-alerts                # 200, PUB flood alert event feed
 | 2 — RAG | F3 context injection into `rag.py` chain prompt | 1–2 test chats |
 | 3 — WIDB | PDF table parser → `disease_week` block in snapshot | 0 credits |
 | 4 — URA (optional) | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) | 0 credits |
+| 5 — ACE guidelines | Clinical-guidelines PDFs in the RAG corpus: `pypdf` extraction, append-only `ingest_pdf()` with hash dedupe, `POST /api/ingest-pdf` + `GET /api/pdfs`, 4th prompt section "Clinical guidelines", UI upload bar, optional `scripts/ace_guidelines.py` sitemap crawler for all 29 ACE ACGs. Plan: `docs/superpowers/plans/2026-09-08-ace-guidelines-pdf.md` — **DONE 2026-09-08** (manual-upload path + full seed: 96 guideline PDFs / 2,975 guideline chunks in the store; 1 scanned appendix uningested) | ~1–2 credits (upload path) / a few cents (full ACE seed) |
 
 ## 10. URA e-Services API — `eservice.ura.gov.sg` (access key VERIFIED 2026-09-08)
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — CP_RAG
 
-RAG chat app over Primary Care SG chronic-care care protocols + MOH public health guidance (Phase 2). FastAPI serves a single-page UI (`static/index.html`); `rag.py` scrapes the source sites (`SOURCES`), embeds chunks into a persisted Chroma store, and answers via `deepseek/deepseek-v4-flash-0731` (paid, fast) routed through **OpenRouter** (OpenAI-compatible gateway; provider + models are env-configured, see `.env.example`). The RAG prompt has three labelled sections — *Protocol content* / *Public health guidance* / *Local context* (live snapshot, provenance rules in `docs/signal-research.md` §12–13).
+RAG chat app over Primary Care SG chronic-care care protocols + MOH public health guidance (Phase 2). FastAPI serves a single-page UI (`static/index.html`); `rag.py` scrapes the source sites (`SOURCES`), embeds chunks into a persisted Chroma store, and answers via `deepseek/deepseek-v4-flash-0731` (paid, fast) routed through **OpenRouter** (OpenAI-compatible gateway; provider + models are env-configured, see `.env.example`). The RAG prompt has four labelled sections — *Protocol content* / *Clinical guidelines* / *Public health guidance* / *Local context* (live snapshot, provenance rules in `docs/signal-research.md` §12–13).
 
 Read this file at the start of every session. Make **one focused change per session**, verify it boots (see Commands), then stop and let me commit.
 
@@ -15,20 +15,21 @@ Read this file at the start of every session. Make **one focused change per sess
 ## Stack (decided — don't re-litigate)
 
 - **FastAPI** + **uvicorn** (async endpoints, `lifespan` builds the RAG chain at startup if `chroma_db/` exists).
-- **LangChain 0.3.x** (`langchain-community`, `langchain-openai`) — chain: retriever (k=5) + `ChatPromptTemplate` + chat model (env `CHAT_MODEL`, currently `deepseek/deepseek-v4-flash-0731` via OpenRouter, temperature 0).
+- **LangChain 0.3.x** (`langchain-community`, `langchain-openai`) — chain: retriever (k=12 since Phase 5's guideline corpus) + `ChatPromptTemplate` + chat model (env `CHAT_MODEL`, currently `deepseek/deepseek-v4-flash-0731` via OpenRouter, temperature 0).
 - **Chroma** persisted at `./chroma_db`, embeddings `text-embedding-ada-002` (env `EMBED_MODEL`; currently served via OpenRouter). Changing the embedding model invalidates the index — re-ingest.
-- **BeautifulSoup** text extraction, chunking 1000/200.
-- UI is one static HTML file talking to five JSON endpoints. No build step, no framework.
+- **BeautifulSoup** text extraction, chunking 1000/200. PDFs (Phase 5): `pypdf` text extraction + `ingest_pdf()` (append-only, sha256 dedupe) for clinical-guideline PDFs (`GUIDELINE_SITES` routing → prompt section *Clinical guidelines*).
+- UI is one static HTML file talking to seven JSON endpoints (incl. the Phase 5 guideline-PDF upload bar). No build step, no framework.
 - **Context layer** (Phases 0–2, done): `context/` package (stdlib-only) builds a live population-level snapshot from key-free data.gov.sg feeds; `GET /api/context` serves it with a 15-min in-memory cache (cold builds take ~15–40 s); the UI strip at the top of `static/index.html` renders it and auto-refreshes every 15 min. Every active protocol link is provenance-tagged (`basis`: corpus/partial/derived/none + `basis_note`, from the corpus audit of 2026-09-08 — `docs/signal-research.md` §12) and rendered as a badge on the strip. **The RAG prompt never presents `derived` links as protocol content** — `context/prompts.py` enforces the split: corpus/partial basis notes → *Protocol content*; all live signals → *Local context* (labelled "not protocol content"); moh.gov.sg chunks → *Public health guidance*. Clinic point for the prompt: `CONTEXT_LAT`/`CONTEXT_LON`/`CONTEXT_NAME` env (default: test clinic in `context/config.py`); chat reuses the 15-min cache and never blocks on a build.
 
 ## Repo layout
 
 ```
 CP_RAG/
-  app.py            # FastAPI app: /, /api/chat, /api/ingest, /api/ingest/append, /api/status, /api/context
-  rag.py            # scrape → chunk → embed → persist; retriever + chain
-  static/index.html # chat UI + F2 live-context strip (top of page)
+  app.py            # FastAPI app: /, /api/chat, /api/ingest, /api/ingest/append, /api/ingest-pdf, /api/pdfs, /api/status, /api/context
+  rag.py            # scrape → chunk → embed → persist; retriever + chain; ingest_pdf() for guideline PDFs
+  static/index.html # chat UI + F2 live-context strip (top of page) + Phase 5 PDF upload bar
   context/          # live SG population-context layer (Phase 0/1; stdlib-only, key-free)
+  scripts/          # ace_guidelines.py (Phase 5 optional crawler; stdlib + requests + bs4)
   docs/             # signal-research.md (data sources, phase plan)
   chroma_db/        # persisted Chroma store (gitignored, expensive to rebuild)
   requirements.txt
