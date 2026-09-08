@@ -647,6 +647,9 @@
     if (dwD.week != null) chips.push(chipHtml('WIDB W' + ((dw.epi_week || '').split('-W')[1] || '?'),
       'dengue ' + dwD.week + (dwD.prev_week != null ? ' (prev ' + dwD.prev_week + ')' : ''),
       dwD.median_5yr != null && dwD.week > dwD.median_5yr ? 'warn' : 'info'));
+    const cc = snap.catchment_change || {};
+    if (cc.healthcare_decisions_90d_count != null)
+      chips.push(chipHtml('URA 90d', cc.healthcare_decisions_90d_count + ' healthcare-related', 'info'));
     if (active.length) chips.push(chipHtml('Protocols', active.length + ' linked', 'info'));
     else chips.push(chipHtml('Signals', 'none elevated', 'good'));
     if ((snap.data_gaps || []).length) chips.push(chipHtml('Gaps', String(snap.data_gaps.length), 'warn'));
@@ -717,6 +720,16 @@
       widbHtml += '<div class="row dim">unavailable (see data gaps)</div>';
     }
 
+    let uraHtml = '<h3>Planning decisions (URA, island-wide)</h3>';
+    if (cc.healthcare_decisions_90d_count != null) {
+      uraHtml += `<div class="row dim">${escapeHtml(cc.window || '')} — ${cc.rows_scanned != null ? cc.rows_scanned : '?'} written permissions scanned</div>`;
+      const hcd = cc.healthcare_decisions_90d || [];
+      uraHtml += hcd.length
+        ? hcd.map(a => `<div class="row">• ${escapeHtml(a.date || '?')}: ${escapeHtml(a.address || '?')} — ${escapeHtml((a.what || '?').slice(0, 90))}${a.decision_type ? ' <span class="dim">[' + escapeHtml(a.decision_type) + ']</span>' : ''}</div>`).join('')
+        : '<div class="row dim">• no healthcare-related decisions in window</div>';
+      uraHtml += `<div class="row dim">${escapeHtml(cc.caveat || 'planning permission ≠ opened facility')}</div>`;
+    } else uraHtml += '<div class="row dim">unavailable (see data gaps)</div>';
+
     let miscHtml = '<h3>Data quality</h3>';
     const gaps = snap.data_gaps || [];
     miscHtml += gaps.length
@@ -760,6 +773,7 @@
       + `<div class="ctx-card">${weatherHtml}</div>`
       + `<div class="ctx-card">${dengueHtml}</div>`
       + `<div class="ctx-card">${widbHtml}</div>`
+      + `<div class="ctx-card">${uraHtml}</div>`
       + `<div class="ctx-card">${miscHtml}</div>`;
   }
 
