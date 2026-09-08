@@ -205,7 +205,7 @@ GET .../weather/flood-alerts                # 200, PUB flood alert event feed
 | 3 — WIDB | PDF table parser → `disease_week` block in snapshot | 0 credits |
 
 (Phases 0, 2, 5 as above; **Phase 3 — WIDB: DONE 2026-09-08** — `context/widb.py`: archive crawl → walk-back PDF fetch → pypdf parser → `disease_week` block; WIDB line in *Local context*; CLI `DISEASE` section; UI chip + card. Build notes in §14.)
-| 4 — URA | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) — **DONE 2026-09-08** (`context/ura.py`: daily token → `Planning_Decision&last_dnload_date=<today−90d>`; healthcare keyword filter on `submission_desc`; 24 h disk cache; `catchment_change` snapshot block = island-wide healthcare-related written permissions, latest 20, each with `decision_type` — NOT opened facilities; *Local context* prompt line; CLI `PLANNING` section; UI chip + card; no key → `ura:` data gap). Sketch deviation: `new_resi_units_approved_region` dropped (no units field in the service; regional aggregation needs OneMap geocoding — deferred, §15) | 0 credits |
+| 4 — URA | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) — **DONE + live-verified 2026-09-08** (2,363 rows / 74 healthcare-related in the 90-day window, §15) (`context/ura.py`: daily token → `Planning_Decision&last_dnload_date=<today−90d>`; healthcare keyword filter on `submission_desc`; 24 h disk cache; `catchment_change` snapshot block = island-wide healthcare-related written permissions, latest 20, each with `decision_type` — NOT opened facilities; *Local context* prompt line; CLI `PLANNING` section; UI chip + card; no key → `ura:` data gap). Sketch deviation: `new_resi_units_approved_region` dropped (no units field in the service; regional aggregation needs OneMap geocoding — deferred, §15) | 0 credits |
 | 5 — ACE guidelines | Clinical-guidelines PDFs in the RAG corpus: `pypdf` extraction, append-only `ingest_pdf()` with hash dedupe, `POST /api/ingest-pdf` + `GET /api/pdfs`, 4th prompt section "Clinical guidelines", UI upload bar, optional `scripts/ace_guidelines.py` sitemap crawler for all 29 ACE ACGs. Plan: `docs/superpowers/plans/2026-09-08-ace-guidelines-pdf.md` — **DONE 2026-09-08** (manual-upload path + full seed: 96 guideline PDFs / 2,975 guideline chunks in the store; 1 scanned appendix uningested) | ~1–2 credits (upload path) / a few cents (full ACE seed) |
 
 ## 10. URA e-Services API — `eservice.ura.gov.sg` (access key VERIFIED 2026-09-08)
@@ -249,9 +249,11 @@ Geocoding API is free) or address→region text matching; (3) ~1k rows/week — 
 carry no unit counts, and `address` is a street address with no
 postcode/region, so regional aggregation requires geocoding (OneMap's free
 API needs its own key) or a street→region table — both deferred. v1 ships
-`healthcare_decisions_90d` (island-wide; granted AND rejected, each with
-`decision_type` — the sketch's `healthcare_approvals_90d` refined, since
-the service returns both and the type is only observable live). Catchment
+`healthcare_decisions_90d` (island-wide; every `decision_type`, each
+labelled — the sketch's `healthcare_approvals_90d` refined, since the
+service returns multiple decision types, observable only live: in the
+2026-09-08 window `Written Permission`/`Authorized Work`/`Corrigendum`,
+no refusals — §15). Catchment
 mapping (caveat 2) is the named follow-up if per-clinic distance filtering
 is wanted.
 
@@ -520,9 +522,22 @@ cache-hit no-refetch, no-key gap, token-HTTP-failure and bad-Status error
 paths (`/tmp/verify_ura_task1.py`); prompt line renders with the caveat,
 absent block adds nothing (`/tmp/verify_ura_task2.py`); no-key CLI shows
 the gap and no `PLANNING` section; seeded-cache CLI shows the section;
-live `/api/context` → `ura:` gap only, no crash. Live API verification
-pending `URA_ACCESS_KEY` in `.env` (plan Appendix A:
-`docs/superpowers/plans/2026-09-08-ura-planning-decisions.md`).
+live `/api/context` → `ura:` gap only, no crash.
+
+**Live verification (2026-09-08, `URA_ACCESS_KEY` set, plan Appendix A):**
+fresh fetch → window 2026-06-10 to 2026-09-08, **2,363 rows scanned,
+74 healthcare-related decisions** (≈3 % of all decisions; keyword overlap:
+CLINIC 45, MEDICAL 36, CHILD CARE 13, SENIOR 8, POLYCLINIC 4, NURSING HOME 6
+— rows can match several). **Observed `decision_type` values across all 74:
+`Written Permission` (67), `Authorized Work` (6), `Corrigendum` (1)** — no
+refusal-type rows in this window (the code never branches on
+`decision_type`, it only displays it, so nothing to change). Note: the API
+filters by record *created/modified* date, not decision date — a few
+healthcare rows carry `decision_date`s earlier than the window start
+(oldest 2026-02-03; e.g. late corrigenda). CLI `PLANNING` section and
+`/api/context` `catchment_change` both render the real rows
+(`data_gaps: []`); negative check (key commented out) → `ura:` gap + no
+`PLANNING` section, key restored. UI: `/` → 200, card markup present.
 
 Follow-ups (not built): catchment geocoding of `address` (OneMap free key
 or street→region table) for per-clinic distance; residential-unit counts
