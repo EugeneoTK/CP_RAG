@@ -186,6 +186,15 @@
     }
 
     #ingest-bar button:hover:not(:disabled) { background: #b45309; }
+    #pdf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 0 0 10px; padding: 7px 12px; border-radius: 10px;
+      background: #f0f9ff; border: 1px solid #bae6fd; font-size: 0.82rem; }
+    #pdf-bar .pdf-label { font-weight: 600; color: #075985; }
+    #pdf-bar label.pdf-btn { cursor: pointer; padding: 4px 10px; border-radius: 8px;
+      background: #0ea5e9; color: #fff; font-weight: 600; font-size: 0.8rem; }
+    #pdf-bar label.pdf-btn:hover { background: #0284c7; }
+    #pdf-status { color: #0369a1; }
+    #pdf-count { margin-left: auto; color: #64748b; font-size: 0.75rem; }
 
     .empty-state {
       flex: 1;
@@ -378,6 +387,14 @@
     <button id="ingest-btn" onclick="runIngest()">Run Ingestion</button>
   </div>
 
+  <div id="pdf-bar">
+    <span class="pdf-label">Clinical guidelines</span>
+    <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
+      accept="application/pdf,.pdf" style="display:none" onchange="uploadPdf(this)"></label>
+    <span id="pdf-status"></span>
+    <span id="pdf-count"></span>
+  </div>
+
   <div id="chat-window">
     <div class="empty-state" id="empty-state">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -510,6 +527,46 @@
       ingestBtn.disabled = false;
     }
   }
+
+  async function refreshPdfs() {
+    try {
+      const res = await fetch('/api/pdfs');
+      const data = await res.json();
+      const n = (data.pdfs || []).length;
+      document.getElementById('pdf-count').textContent =
+        n ? (n + ' guideline PDF' + (n > 1 ? 's' : '') + ' in store') : '';
+    } catch (e) { /* server not up yet */ }
+  }
+
+  async function uploadPdf(input) {
+    const f = input.files && input.files[0];
+    input.value = '';
+    if (!f) return;
+    const status = document.getElementById('pdf-status');
+    status.textContent = 'Uploading + embedding...';
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      status.textContent = 'Uploading + embedding... ' +
+        Math.floor((Date.now() - t0) / 1000) + 's';
+    }, 1000);
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('title', f.name.replace(/\.pdf$/i, ''));
+      const res = await fetch('/api/ingest-pdf', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+      status.textContent = data.skipped
+        ? 'Already in store (duplicate)'
+        : 'Added ' + data.chunks_added + ' chunks';
+      refreshPdfs();
+    } catch (e) {
+      status.textContent = 'Upload failed: ' + e.message;
+    } finally {
+      clearInterval(timer);
+    }
+  }
+  refreshPdfs();
 
   function handleKey(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
