@@ -24,7 +24,8 @@ def main(argv=None):
                     help="clinic postcode (approximate district centroid)")
     ap.add_argument("--name", default=None, help="clinic name label")
     ap.add_argument("--json", action="store_true", help="emit raw JSON only")
-    ap.add_argument("--no-cache", action="store_true", help="refetch GEOJSON layers")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="refetch GEOJSON layers and the WIDB bulletin")
     args = ap.parse_args(argv)
 
     if args.lat is not None and args.lon is not None:
@@ -106,6 +107,13 @@ def main(argv=None):
         print("         - none within 3 km")
     print("         high-Aedes areas: %d total; clinic inside: %s"
           % (d.get("aedes_areas_total", 0), "YES" if d.get("in_high_aedes_area") else "no"))
+
+    dw = snap.get("disease_week") or {}
+    if dw.get("epi_week"):
+        print("DISEASE  WIDB %s (%s), CDA weekly bulletin"
+              % (dw["epi_week"], dw.get("date_range") or "?"))
+        for n in dw.get("notable") or []:
+            print("         - " + n)
 
     if "nearest_services" in snap:
         for p in snap["nearest_services"]["polyclinics"]:

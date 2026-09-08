@@ -643,6 +643,10 @@
     if (rainy.length) chips.push(chipHtml('Rain', rainy.join(', '), 'info'));
     if (near.length) chips.push(chipHtml('Dengue', (near[0].locality || '') + ' ' + (near[0].case_size || 0) + ' cases ' + near[0].km + ' km', 'bad'));
     if (d.in_high_aedes_area) chips.push(chipHtml('Aedes', 'high area', 'warn'));
+    const dw = snap.disease_week || {}, dwD = dw.dengue || {};
+    if (dwD.week != null) chips.push(chipHtml('WIDB W' + ((dw.epi_week || '').split('-W')[1] || '?'),
+      'dengue ' + dwD.week + (dwD.prev_week != null ? ' (prev ' + dwD.prev_week + ')' : ''),
+      dwD.median_5yr != null && dwD.week > dwD.median_5yr ? 'warn' : 'info'));
     if (active.length) chips.push(chipHtml('Protocols', active.length + ' linked', 'info'));
     else chips.push(chipHtml('Signals', 'none elevated', 'good'));
     if ((snap.data_gaps || []).length) chips.push(chipHtml('Gaps', String(snap.data_gaps.length), 'warn'));
@@ -686,6 +690,33 @@
       : '<div class="row dim">• none within 3 km</div>';
     if (d.aedes_areas_total != null) dengueHtml += `<div class="row">High-Aedes areas: ${d.aedes_areas_total} total; clinic inside: ${d.in_high_aedes_area ? 'YES' : 'no'}</div>`;
 
+    let widbHtml = '<h3>Infectious diseases (WIDB, national)</h3>';
+    if (dw.epi_week) {
+      widbHtml += `<div class="row"><strong>${escapeHtml(dw.epi_week)}</strong> ${escapeHtml(dw.date_range || '')} — CDA weekly bulletin</div>`;
+      if (dwD.week != null) {
+        widbHtml += `<div class="row">Dengue: ${dwD.week} this week (prev ${dwD.prev_week != null ? dwD.prev_week : '—'}, 5-yr same-wk median ${dwD.median_5yr != null ? dwD.median_5yr : '—'})</div>`;
+        if (dwD.cum != null) widbHtml += `<div class="row dim">YTD: ${dwD.cum} (2025 same period: ${dwD.cum_prev != null ? dwD.cum_prev : '—'})</div>`;
+        if (dwD.hospital_admissions != null) widbHtml += `<div class="row dim">${dwD.hospital_admissions} hospital admissions this week${dwD.notifications != null ? ' · ' + dwD.notifications + ' notifications' : ''}</div>`;
+      }
+      const flu = dw.influenza || {};
+      if (flu.ili_positivity_pct != null) {
+        let fluLine = 'Influenza: ILI positivity ' + flu.ili_positivity_pct + '% (n=' + (flu.ili_samples != null ? flu.ili_samples : '?') + ')';
+        if (flu.types_pct) fluLine += ' — ' + Object.entries(flu.types_pct).map(([t, p]) => escapeHtml(t) + ' ' + p + '%').join(', ');
+        widbHtml += `<div class="row">${fluLine}</div>`;
+      }
+      const ari = dw.ari || {};
+      if (ari.polyclinic_attendances != null) {
+        let ariLine = 'ARI polyclinic attendances ' + ari.polyclinic_attendances + '/day';
+        const ariRow = (dw.other || {})['Acute Upper Respiratory Infections'] || {};
+        if (ariRow.median_5yr != null) ariLine += ' (5-yr same-wk median ' + ariRow.median_5yr + ')';
+        if (ari.covid_positivity_pct != null) ariLine += ' · COVID-19 ARI positivity ' + ari.covid_positivity_pct + '%';
+        widbHtml += `<div class="row">${escapeHtml(ariLine)}</div>`;
+      }
+      if (dw.url) widbHtml += `<div class="row dim"><a href="${escapeHtml(dw.url)}" target="_blank" rel="noopener">Bulletin PDF</a></div>`;
+    } else {
+      widbHtml += '<div class="row dim">unavailable (see data gaps)</div>';
+    }
+
     let miscHtml = '<h3>Data quality</h3>';
     const gaps = snap.data_gaps || [];
     miscHtml += gaps.length
@@ -728,6 +759,7 @@
       + `<div class="ctx-card">${airHtml}</div>`
       + `<div class="ctx-card">${weatherHtml}</div>`
       + `<div class="ctx-card">${dengueHtml}</div>`
+      + `<div class="ctx-card">${widbHtml}</div>`
       + `<div class="ctx-card">${miscHtml}</div>`;
   }
 

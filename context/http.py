@@ -33,11 +33,14 @@ def get_json(url, timeout=45, retries=4, backoff=5, extra_headers=None):
     raise last
 
 
-def get_bytes(url, timeout=90, retries=3, backoff=5):
+def get_bytes(url, timeout=90, retries=3, backoff=5, extra_headers=None):
+    headers = dict(UA)
+    if extra_headers:
+        headers.update(extra_headers)
     last = None
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers=UA)
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read()
         except urllib.error.HTTPError as e:

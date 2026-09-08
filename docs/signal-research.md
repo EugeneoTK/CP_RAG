@@ -203,6 +203,8 @@ GET .../weather/flood-alerts                # 200, PUB flood alert event feed
 | 1 — Panel | F2 UI strip on `static/index.html` fed by `GET /api/context` — **DONE 2026-09-08** (lat/lon or postcode params, in-memory 15-min cache keyed on 3-dp coords, `X-Snapshot-Cache` header, strip with chips + detail cards + location switcher + 15-min auto-refresh) | 0 credits |
 | 2 — RAG | F3 context injection into `rag.py` chain prompt | 1–2 test chats |
 | 3 — WIDB | PDF table parser → `disease_week` block in snapshot | 0 credits |
+
+(Phases 0, 2, 5 as above; **Phase 3 — WIDB: DONE 2026-09-08** — `context/widb.py`: archive crawl → walk-back PDF fetch → pypdf parser → `disease_week` block; WIDB line in *Local context*; CLI `DISEASE` section; UI chip + card. Build notes in §14.)
 | 4 — URA (optional) | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) | 0 credits |
 | 5 — ACE guidelines | Clinical-guidelines PDFs in the RAG corpus: `pypdf` extraction, append-only `ingest_pdf()` with hash dedupe, `POST /api/ingest-pdf` + `GET /api/pdfs`, 4th prompt section "Clinical guidelines", UI upload bar, optional `scripts/ace_guidelines.py` sitemap crawler for all 29 ACE ACGs. Plan: `docs/superpowers/plans/2026-09-08-ace-guidelines-pdf.md` — **DONE 2026-09-08** (manual-upload path + full seed: 96 guideline PDFs / 2,975 guideline chunks in the store; 1 scanned appendix uningested) | ~1–2 credits (upload path) / a few cents (full ACE seed) |
 
@@ -422,4 +424,59 @@ Asthma/COPD protocols *do* mention haze ("Advise on haze precautions when
 appropriate") — the §12 audit grep word list missed "haze" (10 chunks).
 `pm25` basis corrected `derived` → `partial` with a corpus-exact note;
 `psi` stays `derived` (no PSI threshold anywhere in protocol text).
+
+## 14. Phase 3 build notes — WIDB (completed 2026-09-08)
+
+Phase 3 delivered the CDA Weekly Infectious Disease Bulletin (`disease_week`)
+as a population-level signal, verified live (0 API credits — key-free PDF).
+
+**1. Fetch — `context/widb.py`.** `list_bulletins()` crawls the CDA archive
+pages (2026 then 2025, `config.WIDB_ARCHIVE_URL`) and collects every
+`EW NN` PDF link on `isomer-user-content.by.gov.sg`. `fetch_latest()`
+walks the list newest→oldest, downloads with a browser User-Agent (CDA
+serves S3 which 403s the default python UA — `http.get_bytes` now takes
+`extra_headers`), and parses the **first PDF that yields a payload**, so a
+broken newest file (observed live: `EW 34` intermittently 403s from S3)
+falls back to `EW 33` without erroring the snapshot. PDF URLs are
+percent-encoded. Disk-cached `widb_latest.json`, TTL 3 days
+(`config.WIDB_CACHE_TTL_SECONDS`) — WIDB is weekly, so a 3-day TTL
+survives the Sunday publish gap and any archive blip.
+
+**2. Parse — `parse_widb()` (pypdf, already a Phase-5 dependency).**
+Verified against EW 33, 32 and 1. Page 1: the master disease table —
+per-disease rows `<name> <week> <prev_week> <median same-week 2021–25>`
+plus `cum`/`cum_prev` for notifiable diseases (5-number rows; ARI/other
+diseases have 3, no cumulative — column mapping verified arithmetically:
+EW32 cum + EW33 week == EW33 cum for dengue). All pages are flattened
+whitespace-normalized and the key narratives are pulled by regex:
+influenza type distribution + ILI positivity, COVID-19 ARI positivity,
+top ARI pathogens (adult/paediatric), ARI polyclinic attendances (page 2);
+dengue notifications / hospital admissions / serotypes (page 4).
+`epi_week` comes from the PDF's `EPIDEMIOLOGICAL WEEK N` header line; the
+walk-back ordering uses the `EW NN` in the archive filename.
+**Parser pitfalls (all hit and fixed):** (a) the disease row regex
+originally allowed digits in names — that backtracked across multi-digit
+cells and dropped rows; names now exclude digits. (b) the bulletin wraps
+"…in E-\nweek 33" across a line break — the ARI-attendances regex allows
+optional whitespace after `E-`. (c) a name-only line whose numbers land on
+the following line (e.g. `Mpox#`) is matched by a two-line fallback.
+
+**3. Snapshot — `context/snapshot.py`.** `disease_week` block (national
+counts + `dengue` + `ari` + `source`). A fetch failure appends
+`widb: <reason>` to `data_gaps` and omits the block — never crashes the
+rest of the snapshot.
+
+**4. Prompt — `context/prompts.py`.** One `disease_week` line in *Local
+context* (dengue week vs prev vs median, admissions, ILI/ARI/COVID %,
+top subtype, HFMD). Labelled national counts, "not protocol content".
+
+**5. CLI + UI.** `python -m context` prints a `DISEASE` section;
+`static/index.html` adds a WIDB chip to the strip + an "Infectious diseases
+(WIDB, national)" detail card. `node --check` on the page script OK.
+
+**Verification (0 credits).** EW33/EW32/EW1 parse spot-checked by hand
+against the PDFs; live `fetch_latest()` → EW34; cache hit on second call;
+walk-back + all-fail paths exercised with a monkeypatched `get_bytes`
+(deterministic, `/tmp/widb_fallback_test.py`); `/api/context` returns
+`disease_week` with `data_gaps: []`; `/api/status` → `ready:true`.
 

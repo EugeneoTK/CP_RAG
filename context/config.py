@@ -18,6 +18,17 @@ RT_ENDPOINTS = {
     "flood_alerts": RT_BASE + "/weather/flood-alerts",
 }
 
+# --- WIDB (CDA weekly infectious-diseases bulletin, PDF-only, weekly) ------------
+# Archive page is per-year; the current year's page is the one that gets updated.
+# Browser UA required (isomer-user-content S3 rejects non-browser UAs).
+WIDB_ARCHIVE_URL = "https://www.cda.gov.sg/resources/weekly-infectious-diseases-bulletin-{year}/"
+WIDB_UA = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+}
+WIDB_MAX_LOOKBACK = 5      # walk back at most N epi-weeks to find a parseable PDF
+WIDB_CACHE_TTL_SECONDS = 3 * 24 * 3600  # weekly publication cadence
+
 # --- GEOJSON via v1 poll-download (key-free) -------------------------------------
 V1_POLL = "https://api-open.data.gov.sg/v1/public/api/datasets/{did}/poll-download"
 GEOJSON_DATASETS = {

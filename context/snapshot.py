@@ -8,7 +8,7 @@ it lands in data_gaps so the snapshot is always emitted.
 import datetime
 import time
 
-from . import config, fetchers
+from . import config, fetchers, widb
 from .geo import haversine_km, point_in_polygon
 from .linkage import PROTOCOLS, build_protocol_links
 
@@ -173,6 +173,14 @@ def build_snapshot(lat, lon, name, use_cache=True):
                 aedes_in = True
                 break
     snap["dengue"]["in_high_aedes_area"] = aedes_in
+
+    # --- WIDB: CDA weekly infectious diseases bulletin (national, Phase 3) ---------------
+    time.sleep(2)
+    widb_val, widb_err = widb.fetch_latest(use_cache)
+    if widb_err:
+        gaps.append("widb: %s" % widb_err)
+    else:
+        snap["disease_week"] = widb_val
 
     # --- nearest polyclines (service availability) -------------------------------------
     pcs, err = _nearest_polyclinics(lat, lon)

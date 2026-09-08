@@ -41,12 +41,22 @@ def format_live_context(snapshot):
 
     if not signal_lines:
         signal_lines.append("- no elevated signals: all context signals within normal range")
+    local_lines = signal_lines
+    # WIDB (Phase 3): national weekly infectious disease counts (CDA bulletin) —
+    # baseline context, not an "elevated signal", so it never suppresses the
+    # normal-range line above; it is still observation, never protocol content.
+    dw = snapshot.get("disease_week") or {}
+    if dw.get("epi_week"):
+        line = "- WIDB %s (%s), CDA weekly bulletin — national counts: " % (
+            dw["epi_week"], dw.get("date_range") or "?")
+        line += "; ".join(dw.get("notable") or ["table parsed, no narrative fields"])
+        local_lines = signal_lines + [line]
     local = (
-        "Live population-level signals (NEA / data.gov.sg) — observations "
+        "Live population-level signals (NEA / data.gov.sg / CDA) — observations "
         "about the area right now, NOT protocol content; never present them "
         "as if the protocols said so. Use them to frame the answer "
         "(environmental triggers, sick-day rules, counselling).\n"
-        + "\n".join(signal_lines)
+        + "\n".join(local_lines)
     )
     if counselling:
         local += (
