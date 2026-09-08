@@ -403,7 +403,12 @@ def build_chain(vectorstore: Chroma, context_provider=None):
     # defaults: 600 s/attempt x 3 tries) before surfacing as an error.
     llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL,
                      temperature=0, timeout=300, max_retries=1)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    # k=5 was tuned for the small protocol corpus; with the Phase 5 guideline
+    # PDFs (~3k chunks, a single ACG can span 30+ chunks) 5 retrieved chunks
+    # surfaced only titles/intro text for longer guidelines. 12 keeps the
+    # prompt well under the context window (~15k chars) while covering a
+    # guideline's relevant section.
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 12})
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     answer_chain = prompt | llm | StrOutputParser()
 
