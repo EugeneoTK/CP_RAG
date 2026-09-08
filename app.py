@@ -5,14 +5,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 load_dotenv()
 
-from rag import build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR
+from rag import (build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR,
+                 ingest_pdf, list_pdfs, MAX_PDF_BYTES)
 from context.config import POSTCODE_DISTRICTS, TEST_CLINIC
 from context.snapshot import build_snapshot
 
@@ -140,6 +141,40 @@ async def run_ingest_append():
     rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
     return {"status": "ok", "new_chunks": new_chunks,
             "sources_added": sources_added, "sources_skipped": sources_skipped}
+
+
+@app.post("/api/ingest-pdf")
+async def run_ingest_pdf(file: UploadFile = File(...),
+                         title: str = Form(""), source: str = Form("")):
+    """Ingest one uploaded guideline PDF (parse + embed, dedupe by content
+    hash). Parse/embed is blocking — executor per the no-freeze rule."""
+    global rag_chain
+    data = await file.read()
+    if len(data) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=400, detail="PDF exceeds 25 MB cap")
+    if data[:5] != b"%PDF-":
+        raise HTTPException(status_code=400, detail="not a PDF file")
+    t = title.strip() or (file.filename or "untitled.pdf")
+    try:
+        added, skipped, doc_hash = await asyncio.get_running_loop().run_in_executor(
+            None, ingest_pdf, data, t, source.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="PDF ingest failed: %s" % e)
+    if not skipped:
+        # rebuild the chain so the retriever sees the new chunks
+        vectorstore = load_vectorstore()
+        rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
+    return {"status": "ok", "title": t, "chunks_added": added,
+            "skipped": skipped, "doc_hash": doc_hash}
+
+
+@app.get("/api/pdfs")
+async def get_pdfs():
+    """Ingested guideline PDFs (title, source, chunk count)."""
+    pdfs = await asyncio.get_running_loop().run_in_executor(None, list_pdfs)
+    return {"pdfs": pdfs}
 
 
 @app.get("/api/status")
