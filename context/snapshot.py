@@ -196,11 +196,11 @@ def build_snapshot(lat, lon, name, use_cache=True):
             "none": "counselling only, no clinical claim",
         },
         "usage": (
-            "Phase 2: inject active links into the RAG prompt in two labelled "
-            "sections — 'Protocol content' (only corpus/partial material, per "
-            "basis_note) and 'Local context' (all live signals, never "
-            "attributable to the protocols). Never present 'derived' links as "
-            "protocol content. Also add active protocol names to the retrieval "
+            "Phase 2 (implemented in rag.py build_chain): the RAG prompt gets "
+            "'Protocol content' (only corpus/partial material, per basis_note) "
+            "and 'Local context' (all live signals, never attributable to the "
+            "protocols). 'derived' links are never presented as protocol "
+            "content. Active protocol names are appended to the retrieval "
             "query (mechanism B)."
         ),
     }

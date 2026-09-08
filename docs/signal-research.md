@@ -295,9 +295,9 @@ Three mechanisms — context never rewrites protocol content, it *frames* it:
 
 | Mechanism | What changes | Phase |
 |-----------|--------------|-------|
-| **A. Interpretation framing** | The RAG system prompt gains a `context_brief` (prose). A question like "68 y/o COPD, worsening breathlessness" is then answered with the live trigger context in mind (e.g. regional PM2.5 29 µg/m³ → environmental trigger, review inhaler adherence + action plan). | Phase 2 |
-| **B. Retrieval steering** | Active protocol names (e.g. "COPD", "heat") are appended to the retrieval query so the vector search surfaces matching chunks — no re-embedding. | Phase 2 |
-| **C. Population counselling** | Visit-level nudges independent of the patient's question (e.g. do-the-mozzie-wipeout while a cluster is active nearby; hydration advice in heat). | Phase 1 UI + Phase 2 |
+| **A. Interpretation framing** | The RAG system prompt gains a `context_brief` (prose). A question like "68 y/o COPD, worsening breathlessness" is then answered with the live trigger context in mind (e.g. regional PM2.5 29 µg/m³ → environmental trigger, review inhaler adherence + action plan). | Phase 2 ✅ (2026-09-08, §13) |
+| **B. Retrieval steering** | Active protocol names (e.g. "COPD", "heat") are appended to the retrieval query so the vector search surfaces matching chunks — no re-embedding. | Phase 2 ✅ (2026-09-08, §13) |
+| **C. Population counselling** | Visit-level nudges independent of the patient's question (e.g. do-the-mozzie-wipeout while a cluster is active nearby; hydration advice in heat). | Phase 1 UI + Phase 2 ✅ (2026-09-08, §13) |
 
 Example linkage (today's live run, Woodlands test clinic):
 
@@ -330,8 +330,8 @@ inside `protocol_links`, and as a provenance badge on the F2 strip.
 | humidity | Allergic Rhinitis, Asthma | partial | Rhinitis protocol names "house dust mite, pets, rodents, cockroaches, indoor moulds, cigarette smoke" as common allergens (8 chunks). Asthma protocol has "trigger avoidance"/"look for triggers" but never names mites/moulds. |
 | heat (WBGT) | DM, CKD, HTN, Gout, Multimorbidity | partial | In corpus: dehydration as a gout flare trigger; CKD hydration advice (euglycaemic DKA risk); "Sick-day advice: Stop SGLT2 inhibitors … while acutely unwell" (CKD + multimorbidity). "Heat"/"WBGT" itself: 0 mentions. |
 | dengue_cluster | DM, CKD, HTN, IHD, Stroke | partial | In corpus: SGLT2 sick-day rules (CKD + multimorbidity). Dengue: 0 mentions in any of the 17 protocols (all "dengue/fever" hits are non-protocol pages: GPFirst, NUHS marketing, yellow-fever vaccination). NS1 differential + NSAID avoidance on anticoagulants = standard practice. |
-| pm25 | Asthma, COPD, IHD, HTN | derived | 0 hits for pollut/PM2.5/air quality/smog anywhere in the corpus. |
-| psi | Asthma, COPD, IHD | derived | 0 hits for PSI. |
+| pm25 | Asthma, COPD, IHD, HTN | partial | **Corrected 2026-09-08:** 10 chunks mention "haze" — Asthma + COPD protocols each say "Advise on haze precautions when appropriate" (single line, no thresholds); PHPC/Haze Subsidy Scheme pages list six haze-related conditions. The original audit word list (pollut/PM2.5/air quality/smog) missed "haze". PM2.5/PSI levels and the exacerbation association: 0 hits in protocol text. |
+| psi | Asthma, COPD, IHD | derived | 0 hits for PSI; the "haze precautions" line carries no PSI threshold. PSI-band → activity advice now citable from the MOH haze page (public guidance, in corpus since Phase 2). |
 | rain | HTN, DM, CKD | derived | Only "flood" hits are the site's legal DDoS disclaimer. Logistics/access argument. |
 | aedes_area | — | none | Population counselling only; no clinical claim. |
 
@@ -345,4 +345,80 @@ Wording fix (2026-09-08): the `dengue_cluster` clinical focus previously read
 "hold metformin/SGLT2 inhibitors during dehydration or vomiting"; the corpus
 only supports the SGLT2 sick-day rule, so it now reads "stop SGLT2 inhibitors
 while acutely unwell (CKD + multimorbidity protocols)".
+
+## 13. Phase 2 build notes (completed 2026-09-08)
+
+Phase 2 delivered F3 (context-injected RAG) + corpus expansion, all verified
+live on the free model with 1 append-embed (~4 chunks) + 2 chat calls.
+
+**1. Provenance renderer — `context/prompts.py`** (new). `format_live_context`
+splits the snapshot into: *basis notes* (only `corpus`/`partial` links, each
+with its `basis_note`) and *local context* (ALL active signals, labelled "not
+protocol content", plus `population_counselling` lines). `derived`/`none`
+never reach the protocol section — enforced in the renderer, not the prompt
+text.
+
+**2. RAG prompt — `rag.py` `build_chain` / `_prepare_sections`.** Three
+labelled sections: *Protocol content* (retrieved chunks, grouped by
+`source_site` — pre-Phase-2 chunks without the metadata group fine) + basis
+notes; *Public health guidance* (moh.gov.sg chunks only, "public guidance,
+not clinic protocol content"); *Local context* (live snapshot: signals,
+clinical framing, counselling, clinic + as-of). No snapshot → local section
+says "unavailable", chain still works.
+
+**3. Retrieval steering (mechanism B).** `_steer_query` appends
+`[related chronic-care protocols: ...]` from active links to the query before
+vector search. No re-embedding.
+
+**4. Multi-source corpus — `rag.py` `SOURCES`.**
+`primarycarepages.sg` (depth 2) + `moh.gov.sg/others/haze/` (depth 0 — the
+site is huge; the haze page is static public guidance). Every chunk gets
+`source_site` metadata. `context/prompts.py` + `linkage.py` `pm25`/`psi`
+basis notes now cite the MOH page as the citable government source.
+
+**5. MOH extractor — `_isomer_text`.** gov.sg Isomer pages need a
+browser-like User-Agent and aggressive boilerplate stripping: `nav`/`footer`/
+`header`, the "Back to top" button column, `<details>/<summary>` link boxes
+("Other pages in this section", "Related sites", "Useful links"). Dry-run:
+~3,049 clean chars, no boilerplate leaks.
+
+**6. Append-only ingest — `ingest_append()` + `POST /api/ingest/append`.**
+Skips sites the store already covers, **matched by host** (not URL — see
+pitfall below); within a new source, skips chunks whose normalized URL
+(lowercase scheme/host/path, no trailing slash, no query/fragment) is stored;
+refuses to embed >500 chunks (credit guard vs OpenRouter's 300k-token
+per-request limit). The one append of Phase 2: 4 MOH chunks
+(3,785 → 3,789), primarycarepages untouched. Full `ingest()` still rebuilds
+everything (fresh directory only).
+
+**Pitfall discovered — primarycarepages rewrote its URL structure.**
+The site now redirects the old paths (`/healthier-sg/care-protocols/
+chronic-care-protocols/...`) to new canonical URLs (`/healthier-sg/
+care-protocols/chronic/...`) with case changes, so a re-crawl produces URLs
+that match none of the 77 stored source URLs. Per-URL dedupe therefore
+treated the whole corpus as "new" (would have re-embedded ~332k tokens —
+billed 400 at the 300k limit). Host-level skip makes append idempotent and
+credit-safe; refreshing an existing site's content requires a full rebuild.
+
+**7. App integration — `app.py`.** Clinic point via `CONTEXT_LAT` /
+`CONTEXT_LON` / `CONTEXT_NAME` (defaults to `context/config.py` TEST_CLINIC).
+Snapshot provider is the same 15-min in-memory cache as `GET /api/context`;
+a cold cache degrades the prompt (local section "unavailable") and schedules
+a background build on the captured app loop — the chat path never blocks.
+`/api/status` reports `{"ready", "context": "building"|"cached (Ns old)"}`.
+
+**Verification (2 free-model chats, `nvidia/nemotron-3.5-lightning:free`).**
+(1) Haze/asthma: retrieved the asthma protocol AND the MOH haze page;
+answer separated *Protocol content* (protocol's own "advise on haze
+precautions" line) from *Local context* ("not protocol content… comes from
+local population-level signals") from *MOH public guidance* (PSI-band
+advice quoted accurately). (2) Heat/DM+CKD: respected the `partial` basis
+note — explicitly refused to present ACEi/ARB review or heat/WBGT as
+protocol-mandated ("would over-claim beyond the basis notes").
+
+**Audit correction (2026-09-08, post-build).** Chat (1) surfaced that the
+Asthma/COPD protocols *do* mention haze ("Advise on haze precautions when
+appropriate") — the §12 audit grep word list missed "haze" (10 chunks).
+`pm25` basis corrected `derived` → `partial` with a corpus-exact note;
+`psi` stays `derived` (no PSI threshold anywhere in protocol text).
 

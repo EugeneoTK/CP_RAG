@@ -48,11 +48,16 @@ _RULES = [
         "signal": "pm25",
         "protocols": ["Asthma", "Chronic Obstructive Pulmonary Disease",
                       "Ischaemic Heart Disease", "Hypertension"],
-        "basis": "derived",
+        "basis": "partial",
         "basis_note": (
-            "Air pollution is not mentioned in any of the 17 protocols; the "
-            "PM2.5 -> respiratory/cardiovascular exacerbation association is "
-            "established clinical knowledge, not protocol content."
+            "In protocol text (Asthma + COPD): 'Advise on haze precautions when "
+            "appropriate' — a single line with no thresholds. NOT in protocol "
+            "text: PM2.5/PSI levels or the PM2.5 -> "
+            "respiratory/cardiovascular exacerbation association (established "
+            "clinical knowledge). Citable government source: MOH public "
+            "guidance on haze (moh.gov.sg/others/haze/, in the corpus as "
+            "'public guidance' — PSI-band activity advice, N95/hydration, keep "
+            "medications on hand)."
         ),
         "clinical_focus": (
             "Elevated PM2.5 is a trigger for airway inflammation and cardiovascular "
@@ -72,8 +77,13 @@ _RULES = [
                       "Ischaemic Heart Disease"],
         "basis": "derived",
         "basis_note": (
-            "PSI bands are not mentioned in the protocol corpus (same basis as "
-            "PM2.5: clinical synthesis, not protocol content)."
+            "PSI bands/scale are not mentioned in the protocol corpus (the "
+            "Asthma/COPD 'haze precautions' line carries no PSI threshold), so "
+            "PSI-band -> activity-advice mapping is clinical synthesis, not "
+            "protocol content. Citable government source: MOH haze guidance "
+            "(moh.gov.sg/others/haze/, in the corpus as 'public guidance') "
+            "defines PSI 101-200 as Unhealthy and 201-300 as Very Unhealthy, "
+            "with band-specific activity advice by population group."
         ),
         "clinical_focus": (
             "PSI in the unhealthy band: same trigger framing as PM2.5; document "

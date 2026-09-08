@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from rag import build_chain, ingest, load_vectorstore, CHROMA_DIR
+from rag import build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR
 from context.config import POSTCODE_DISTRICTS, TEST_CLINIC
 from context.snapshot import build_snapshot
 
@@ -24,13 +24,54 @@ rag_chain = None
 CONTEXT_CACHE_TTL_SECONDS = 15 * 60
 _context_cache = {}  # "lat,lon" -> (built_at_monotonic, snapshot)
 
+# Phase 2: the RAG chain reads the SAME 15-min snapshot cache as GET
+# /api/context, for a fixed clinic point (env-configurable, defaults to
+# TEST_CLINIC). Cold builds take ~15-40 s, so the chat path NEVER blocks on
+# a build: on a cache miss the prompt degrades to "context unavailable" and
+# a background build refreshes the cache for the next chat (within the TTL).
+CONTEXT_LAT = float(os.getenv("CONTEXT_LAT", TEST_CLINIC["lat"]))
+CONTEXT_LON = float(os.getenv("CONTEXT_LON", TEST_CLINIC["lon"]))
+CONTEXT_NAME = os.getenv("CONTEXT_NAME") or TEST_CLINIC["name"]
+CONTEXT_KEY = "%.3f,%.3f" % (CONTEXT_LAT, CONTEXT_LON)
+_context_builds = {}  # "lat,lon" -> in-flight background-build future
+_app_loop = None  # captured in lifespan; get_context_snapshot may run in a worker thread
+
+
+def _schedule_context_build(key, clat, clon, cname):
+    async def _build():
+        try:
+            snap = await asyncio.get_running_loop().run_in_executor(
+                None, build_snapshot, clat, clon, cname)
+            _context_cache[key] = (time.monotonic(), snap)
+        except Exception:
+            pass  # a failed snapshot must never take the app down
+        finally:
+            _context_builds.pop(key, None)
+
+    # run_coroutine_threadsafe: safe whether called from the event loop
+    # (lifespan) or from a worker thread (the chat path).
+    _context_builds[key] = asyncio.run_coroutine_threadsafe(_build(), _app_loop)
+
+
+def get_context_snapshot():
+    """Cached snapshot for the RAG clinic point, or None (never blocks)."""
+    snap, _age = _context_cache_lookup(CONTEXT_KEY)
+    if snap is not None:
+        return snap
+    if CONTEXT_KEY not in _context_builds:
+        _schedule_context_build(CONTEXT_KEY, CONTEXT_LAT, CONTEXT_LON, CONTEXT_NAME)
+    return None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global rag_chain
+    global rag_chain, _app_loop
+    _app_loop = asyncio.get_running_loop()
     if Path(CHROMA_DIR).exists():
         vectorstore = load_vectorstore()
-        rag_chain = build_chain(vectorstore)
+        rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
+        # warm the context cache so the first chat has live context when it lands
+        _schedule_context_build(CONTEXT_KEY, CONTEXT_LAT, CONTEXT_LON, CONTEXT_NAME)
     yield
 
 
@@ -73,13 +114,33 @@ async def run_ingest():
     global rag_chain
     chunks = ingest()
     vectorstore = load_vectorstore()
-    rag_chain = build_chain(vectorstore)
+    rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
     return {"status": "ok", "chunks": chunks}
+
+
+@app.post("/api/ingest/append")
+async def run_ingest_append():
+    """Append-only ingest: embed only chunks whose source URL is not in the
+    store yet (never re-embeds the existing corpus). Rebuilds the chain so
+    the retriever picks up the new chunks."""
+    global rag_chain
+    new_chunks, sources_added, sources_skipped = ingest_append()
+    vectorstore = load_vectorstore()
+    rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
+    return {"status": "ok", "new_chunks": new_chunks,
+            "sources_added": sources_added, "sources_skipped": sources_skipped}
 
 
 @app.get("/api/status")
 async def status():
-    return {"ready": rag_chain is not None}
+    snap, age = _context_cache_lookup(CONTEXT_KEY)
+    if snap is not None:
+        ctx = "cached (%ss old)" % age
+    elif CONTEXT_KEY in _context_builds:
+        ctx = "building"
+    else:
+        ctx = "not-built"
+    return {"ready": rag_chain is not None, "context": ctx}
 
 
 def _resolve_clinic_point(lat, lon, postcode, name):
