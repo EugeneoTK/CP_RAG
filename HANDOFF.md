@@ -1,4 +1,10 @@
-# HANDOFF — CP_RAG (updated 2026-09-08, Phase 5 — ACE clinical-guidelines PDF ingestion)
+# HANDOFF — CP_RAG (updated 2026-09-08, Phase 5 — ACE clinical-guidelines PDF ingestion + post-completion code review)
+
+## Independent code review + fixes (2026-09-08, after Phase 5 plan completion)
+An independent review of the full Phase 5 diff (`62bf8ed~1..187589c`, not just the per-task self-reviews) found 6 issues the task reports missed. Fixed the one security-relevant one plus a stale-copy bug; logged the rest as outstanding (below) rather than scope-creeping into an unplanned refactor.
+- **Fixed — stored XSS in chat sources** (`static/index.html`): `sources` were rendered into `innerHTML` with no escaping (`<a href="${u}">${u}</a>`), unlike the answer text on the line above which does go through `escapeHtml`. This was latent but harmless while `source` was always a hardcoded scrape URL; Phase 5 made it exploitable because `doc_title` (shown in `sources` for PDF chunks) is attacker-controlled — anyone can upload a PDF via `POST /api/ingest-pdf` with a script-tag title/filename, and it fires in every browser that later asks a question retrieving that chunk. Fix: both the `href` and link text now go through `escapeHtml`.
+- **Fixed — stale loading-hint copy** (`static/index.html`): "Thinking… (free-tier model: can take a few minutes)" was left over from the pre-Phase-5 free model; Task 0 (`62bf8ed`) switched to the paid `deepseek-v4-flash-0731` (~8 s responses) in the same commit but didn't update this string. Simplified to "Thinking… Ns" (no model-tier claim, so it can't go stale again on the next model swap).
+- Verified: `node --check` on extracted `<script>` block OK; `/api/status` → `ready:true`; `/` → HTTP 200.
 
 ## Done this session (Phase 5 — full plan `docs/superpowers/plans/2026-09-08-ace-guidelines-pdf.md`, all tasks committed)
 - **Task 0** — `CHAT_MODEL` → `deepseek/deepseek-v4-flash-0731` (paid, ~8 s/chats vs 4–5 min free tier); prior fixes + Phase 5 plan.
@@ -21,6 +27,11 @@
 3. k=12 is a corpus-size heuristic — revisit if answers over- or under-retrieve as the corpus grows.
 4. Refreshing primarycarepages content still requires a full `ingest()` rebuild (URL rewrite defeats host-level append skip) — do it on purpose, not to test.
 5. Postcode geocoding is district-centroid approx (OneMap DNS-blocked on this network); `--lat/--lon` is the exact path.
+6. From the 2026-09-08 post-completion review, not yet fixed (all pre-existing patterns Phase 5 extended, none security-relevant like the XSS above):
+   - `app.py` `/api/ingest-pdf`: the 25 MB cap is checked only after `await file.read()` has already buffered the full body — doesn't bound upload cost, just rejects after the fact.
+   - `rag.py` `ingest_pdf()`: hash/URL dedupe is check-then-act with no lock — two concurrent uploads of the same PDF can both pass the check and both get embedded (double spend, duplicate rows). Same TOCTOU shape as the pre-existing `ingest_append()`.
+   - `rag.py` `list_pdfs()` / `_store_pdf_index()`: full metadata scan of the whole Chroma store on every call (GET /api/pdfs, every upload's dedupe check) — O(n), no caching; fine at ~3k chunks, will slow as the corpus grows.
+   - `rag.py` `_store_pdf_index()` duplicates `_store_url_index()`'s scan loop instead of sharing one helper.
 
 ## Next-session prompt
 Project: CP_RAG at `/Users/ugeneo/Documents/Project Codes/CP_RAG` — FastAPI + LangChain RAG Q&A over Singapore primary-care chronic-care protocols **plus the full ACE clinical-guidelines repository (96 ACG PDFs, 2,975 chunks; `source_site` metadata routes them to a dedicated *Clinical guidelines* prompt section — never cited as protocol content)** + MOH public guidance + live local-context signals. LLM `deepseek/deepseek-v4-flash-0731` + `text-embedding-ada-002` via OpenRouter (env-configured in `.env`, git-ignored — never commit it). Golden rules in `CLAUDE.md`: credits are a budget (prefer `/api/status` over chat probes), Python 3.9, `chroma_db/` is expensive — don't rebuild; new guideline PDFs go through `POST /api/ingest-pdf` (append-only, sha256 dedupe) — the UI has an upload bar, and `scripts/ace_guidelines.py --ingest` re-syncs the ACE repo. Corpus audit + phase table: `docs/signal-research.md` §9/§12/§13. Read `CLAUDE.md` first.

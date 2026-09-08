@@ -453,7 +453,7 @@
       const s = document.createElement('div');
       s.className = 'sources';
       s.innerHTML = '<strong>Sources:</strong>' + sources.map(
-        u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`
+        u => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`
       ).join('');
       div.appendChild(s);
     }
@@ -476,12 +476,11 @@
     loading.innerHTML = '<span></span><span></span><span></span>';
     const hint = document.createElement('div');
     hint.className = 'loading-hint';
-    hint.textContent = 'Thinking… (free-tier model: can take a few minutes)';
+    hint.textContent = 'Thinking…';
     loading.appendChild(hint);
     const t0 = Date.now();
     const hintTimer = setInterval(() => {
-      hint.textContent = 'Thinking… ' + Math.floor((Date.now() - t0) / 1000) +
-        's — free-tier model, can take a few minutes';
+      hint.textContent = 'Thinking… ' + Math.floor((Date.now() - t0) / 1000) + 's';
     }, 1000);
     chatWindow.appendChild(loading);
     chatWindow.scrollTop = chatWindow.scrollHeight;
