@@ -193,6 +193,142 @@
 
     .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
     .empty-state p { font-size: 0.9rem; }
+
+    /* --- F2 context strip (Phase 1) ------------------------------------------- */
+    #ctx-strip { width: 100%; max-width: 800px; padding: 10px 16px 0; }
+
+    #ctx-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 8px 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    #ctx-toggle {
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      background: #f1f5f9;
+      color: #334155;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #ctx-toggle:hover { background: #e2e8f0; }
+
+    #ctx-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+
+    .ctx-chip {
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      white-space: nowrap;
+    }
+    .ctx-chip .k { opacity: 0.65; font-weight: 400; margin-right: 3px; }
+    .ctx-chip.good { background: #dcfce7; color: #166534; }
+    .ctx-chip.warn { background: #fef9c3; color: #854d0e; }
+    .ctx-chip.bad  { background: #fee2e2; color: #991b1b; }
+    .ctx-chip.info { background: #dbeafe; color: #1e40af; }
+    .ctx-chip.muted{ background: #f1f5f9; color: #64748b; }
+
+    #ctx-stamp { font-size: 0.72rem; color: #64748b; white-space: nowrap; }
+
+    .ctx-icobtn {
+      padding: 5px 10px;
+      background: #f1f5f9;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: #334155;
+    }
+    .ctx-icobtn:hover:not(:disabled) { background: #e2e8f0; }
+    .ctx-icobtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #ctx-detail {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      padding: 12px;
+    }
+    #ctx-detail.hidden { display: none; }
+
+    .ctx-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 640px) { .ctx-cards { grid-template-columns: 1fr; } }
+
+    .ctx-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.8rem;
+      color: #334155;
+      line-height: 1.5;
+    }
+    .ctx-card h3 {
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+    .ctx-card .row { margin: 2px 0; }
+    .ctx-card .dim { color: #94a3b8; font-size: 0.74rem; }
+
+    .ctx-wide { grid-column: 1 / -1; }
+
+    .ctx-protos { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+    .ctx-proto {
+      font-size: 0.72rem;
+      background: #eef2ff;
+      color: #3730a3;
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .ctx-counsel { font-style: italic; color: #475569; margin-top: 4px; font-size: 0.76rem; }
+    .ctx-basis {
+      font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+      margin-left: 6px; white-space: nowrap; cursor: help;
+    }
+    .ctx-basis.b-corpus  { background: #dcfce7; color: #166534; }
+    .ctx-basis.b-partial { background: #fef9c3; color: #854d0e; }
+    .ctx-basis.b-derived { background: #f1f5f9; color: #475569; }
+    .ctx-basis.b-none    { background: #e2e8f0; color: #64748b; }
+    .ctx-legend { font-size: 0.68rem; color: #94a3b8; margin-top: 8px; line-height: 1.7; }
+    .ctx-gaps { color: #92400e; }
+    .ctx-ok { color: #166534; }
+
+    #ctx-locbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      font-size: 0.78rem;
+      color: #475569;
+    }
+    #ctx-locbar input {
+      padding: 5px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      width: 92px;
+      outline: none;
+    }
+    #ctx-locbar input:focus { border-color: #1a56db; }
+    .ctx-sm { padding: 5px 12px; font-size: 0.76rem; border-radius: 8px; }
+
+    #ctx-src { margin-top: 8px; font-size: 0.72rem; color: #94a3b8; }
+    #ctx-src a { color: #1a56db; text-decoration: none; }
+    #ctx-src a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -204,6 +340,30 @@
   </div>
   <span id="status-badge">Checking...</span>
 </header>
+
+<section id="ctx-strip">
+  <div id="ctx-bar">
+    <button id="ctx-toggle" onclick="toggleCtx()" aria-expanded="true">Context ▾</button>
+    <div id="ctx-chips"><span class="ctx-chip muted">Loading context…</span></div>
+    <span id="ctx-stamp"></span>
+    <button id="ctx-refresh" class="ctx-icobtn" onclick="refreshContext()" title="Refresh context">⟳</button>
+  </div>
+  <div id="ctx-detail">
+    <div id="ctx-cards" class="ctx-cards"></div>
+    <div id="ctx-locbar">
+      <span>Clinic:</span>
+      <input id="ctx-pc" placeholder="Postcode" maxlength="6">
+      <input id="ctx-lat" placeholder="Lat" type="number" step="any">
+      <input id="ctx-lon" placeholder="Lon" type="number" step="any">
+      <button class="ctx-sm" onclick="updateCtxLocation()">Update</button>
+      <button class="ctx-sm" onclick="resetCtxLocation()">Default</button>
+    </div>
+    <div id="ctx-src">
+      Live population-level data from data.gov.sg (Singapore Open Data License) ·
+      <a href="https://api-open.data.gov.sg" target="_blank" rel="noopener">api-open.data.gov.sg</a>
+    </div>
+  </div>
+</section>
 
 <main>
   <div id="ingest-bar" style="display:none">
@@ -351,7 +511,181 @@
               .replace(/"/g,'&quot;').replace(/\n/g,'<br>');
   }
 
+  // --- F2 context strip (Phase 1) -------------------------------------------------
+  const ctxChips = document.getElementById('ctx-chips');
+  const ctxStamp = document.getElementById('ctx-stamp');
+  const ctxDetail = document.getElementById('ctx-detail');
+  const ctxCards = document.getElementById('ctx-cards');
+  const ctxToggle = document.getElementById('ctx-toggle');
+
+  let ctxQuery = {};            // {} => server default (test clinic)
+  let ctxLoading = false;
+  const CTX_REFRESH_MS = 15 * 60 * 1000;
+
+  async function refreshContext() {
+    if (ctxLoading) return;
+    ctxLoading = true;
+    ctxChips.innerHTML = '<span class="ctx-chip muted">Building context… (first build can take ~40 s)</span>';
+    ctxStamp.textContent = '';
+    document.getElementById('ctx-refresh').disabled = true;
+    try {
+      const qs = new URLSearchParams(ctxQuery).toString();
+      const res = await fetch('/api/context' + (qs ? '?' + qs : ''));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+      renderContext(data, res.headers.get('X-Snapshot-Cache') === 'hit');
+    } catch (e) {
+      ctxChips.innerHTML = '<span class="ctx-chip bad">Context error: '
+        + escapeHtml(String(e.message || e)) + '</span>';
+    } finally {
+      ctxLoading = false;
+      document.getElementById('ctx-refresh').disabled = false;
+    }
+  }
+
+  function chipHtml(k, v, cls) {
+    return `<span class="ctx-chip ${cls || ''}"><span class="k">${k}</span>${escapeHtml(v)}</span>`;
+  }
+  function pm25Cls(v) { return v >= 25 ? 'bad' : (v >= 15 ? 'warn' : 'good'); }
+  function psiCls(v)  { return v >= 101 ? 'bad' : (v >= 51 ? 'warn' : 'good'); }
+  function heatCls(v) { return v === 'High' ? 'bad' : (v === 'Moderate' ? 'warn' : 'good'); }
+
+  function renderContext(snap, cached) {
+    const c = (snap.meta || {}).clinic || {};
+    const aq = snap.air_quality || {};
+    const w = snap.weather || {};
+    const d = snap.dengue || {};
+    const pl = snap.protocol_links || {};
+    const pm = aq.pm25, psi = aq.psi, wb = w.wbgt;
+    const days = (w.outlook_4day && w.outlook_4day.days) || [];
+    const near = d.nearby_clusters || [];
+    const active = pl.active || [];
+
+    // --- one-line chips ---
+    const chips = [];
+    if (pm && pm.peak != null) chips.push(chipHtml('PM2.5', pm.peak.toFixed(0) + ' ' + (pm.peak_region || ''), pm25Cls(pm.peak)));
+    if (psi && psi.peak != null) chips.push(chipHtml('PSI', String(psi.peak), psiCls(psi.peak)));
+    if (wb && wb.max_wbgt_c != null) chips.push(chipHtml('WBGT', wb.max_wbgt_c.toFixed(1) + '°C ' + (wb.max_heat_stress || ''), heatCls(wb.max_heat_stress)));
+    const rainy = days.filter(x => x.text && /thunder|shower/i.test(x.text)).map(x => x.day || '');
+    if (rainy.length) chips.push(chipHtml('Rain', rainy.join(', '), 'info'));
+    if (near.length) chips.push(chipHtml('Dengue', (near[0].locality || '') + ' ' + (near[0].case_size || 0) + ' cases ' + near[0].km + ' km', 'bad'));
+    if (d.in_high_aedes_area) chips.push(chipHtml('Aedes', 'high area', 'warn'));
+    if (active.length) chips.push(chipHtml('Protocols', active.length + ' linked', 'info'));
+    else chips.push(chipHtml('Signals', 'none elevated', 'good'));
+    if ((snap.data_gaps || []).length) chips.push(chipHtml('Gaps', String(snap.data_gaps.length), 'warn'));
+    ctxChips.innerHTML = chips.join('');
+
+    ctxStamp.textContent =
+      ((snap.meta && snap.meta.generated_at) ? 'as of ' + new Date(snap.meta.generated_at).toLocaleString() : '')
+      + (cached ? ' · cached' : '');
+
+    // --- detail cards ---
+    let airHtml = '<h3>Air quality</h3>';
+    if (pm) {
+      airHtml += `<div class="row"><strong>PM2.5</strong> peak ${pm.peak} µg/m³ (${escapeHtml(pm.peak_region || '?')}) · national ${pm.national != null ? pm.national : '—'}</div>`;
+      airHtml += Object.entries(pm.regions || {}).map(([r, v]) =>
+        `<div class="row dim">${escapeHtml(r)}: ${v}</div>`).join('');
+      airHtml += `<div class="row dim">updated ${escapeHtml((pm.updated || '').slice(11, 16) || '?')}</div>`;
+    } else airHtml += '<div class="row dim">pm25 unavailable (see data gaps)</div>';
+    if (psi) airHtml += `<div class="row" style="margin-top:6px"><strong>PSI</strong> peak ${psi.peak} (${escapeHtml(psi.peak_region || '?')}) · national ${psi.national != null ? psi.national : '—'}</div>`;
+    else airHtml += '<div class="row dim">psi unavailable (see data gaps)</div>';
+
+    let weatherHtml = '<h3>Weather &amp; heat</h3>';
+    if (w.today) weatherHtml += `<div class="row"><strong>Today</strong> ${w.today.high_c}/${w.today.low_c}°C — ${escapeHtml(w.today.text || '')}</div>`;
+    if (w.town_2hr) weatherHtml += `<div class="row">2-hr near ${escapeHtml(w.town_2hr.town || '?')} (${w.town_2hr.distance_km} km): ${escapeHtml(w.town_2hr.forecast || '')}</div>`;
+    if (wb) {
+      const ns = wb.nearest_station || {};
+      weatherHtml += `<div class="row"><strong>WBGT</strong> max ${wb.max_wbgt_c}°C (${escapeHtml(wb.max_heat_stress || '?')}) · nearest ${escapeHtml(ns.name || '?')}: ${ns.wbgt_c}°C ${escapeHtml(ns.heat_stress || '')} (${ns.km} km)</div>`;
+    }
+    if (w.flood) {
+      const n = (w.flood.active_alerts || []).length;
+      weatherHtml += `<div class="row">Flood: ${n ? n + ' active alert(s)' : 'no active alerts'}</div>`;
+    }
+    if (days.length) {
+      weatherHtml += '<div class="row" style="margin-top:6px"><strong>Outlook</strong></div>' +
+        days.map(x => `<div class="row dim">${escapeHtml(x.day || '')}: ${x.high_c}/${x.low_c}°C — ${escapeHtml(x.text || '')}</div>`).join('');
+    }
+
+    let dengueHtml = '<h3>Dengue / aedes</h3>';
+    dengueHtml += `<div class="row">${d.clusters_active_total != null ? d.clusters_active_total : 0} active cluster polygons nationally</div>`;
+    dengueHtml += near.length
+      ? near.map(n => `<div class="row">• ${escapeHtml(n.locality || '?')}: ${n.case_size} cases, ${n.km} km (updated ${escapeHtml(n.updated || '?')})</div>`).join('')
+      : '<div class="row dim">• none within 3 km</div>';
+    if (d.aedes_areas_total != null) dengueHtml += `<div class="row">High-Aedes areas: ${d.aedes_areas_total} total; clinic inside: ${d.in_high_aedes_area ? 'YES' : 'no'}</div>`;
+
+    let miscHtml = '<h3>Data quality</h3>';
+    const gaps = snap.data_gaps || [];
+    miscHtml += gaps.length
+      ? '<div class="ctx-gaps">' + gaps.map(g => `<div class="row">• ${escapeHtml(g)}</div>`).join('') + '</div>'
+      : '<div class="row ctx-ok">All sources OK — no data gaps.</div>';
+    if (snap.nearest_services && (snap.nearest_services.pyclinics || []).length) {
+      miscHtml += '<h3 style="margin-top:8px">Nearest polyclinics</h3>' +
+        snap.nearest_services.pyclinics.map(p =>
+          `<div class="row">• ${escapeHtml(p.name || '')} (${escapeHtml(p.postcode || '')}) — ${p.km} km</div>`).join('');
+    }
+    miscHtml += `<div class="row dim" style="margin-top:6px">Clinic: ${escapeHtml(c.name || '')} · NEA region ~${escapeHtml(c.nea_region_approx || '?')}${c.town ? ' · town ~' + escapeHtml(c.town) : ''}</div>`;
+
+    let protosHtml = `<h3>Active protocol links (${active.length} signal${active.length === 1 ? '' : 's'} of ${(pl.corpus || []).length} corpus protocols)</h3>`;
+    const BASIS_LABEL = {
+      corpus: 'in protocol text',
+      partial: 'partial: mechanism in text',
+      derived: 'derived: not protocol text',
+      none: 'counselling only'
+    };
+    protosHtml += active.length
+      ? active.map(l => {
+          const b = BASIS_LABEL[l.basis] ? l.basis : 'derived';
+          return `<div class="row"><strong>${escapeHtml(l.signal || '')}</strong>: ${escapeHtml(l.detail || '')}
+            <span class="ctx-basis b-${b}" title="${escapeHtml(l.basis_note || '')}">${BASIS_LABEL[b]}</span></div>
+           <div class="ctx-protos">${(l.protocols || []).map(p => `<span class="ctx-proto">${escapeHtml(p)}</span>`).join('')}</div>`
+           + (l.population_counselling ? `<div class="ctx-counsel">Counsel: ${escapeHtml(l.population_counselling)}</div>` : '');
+        }).join('')
+      : '<div class="row dim">No elevated signals — all context signals within normal range.</div>';
+    if (active.length) {
+      protosHtml += '<div class="ctx-legend">Basis badge = provenance of the link — '
+        + '<span class="ctx-basis b-corpus">in protocol text</span> may be cited as protocol content; '
+        + '<span class="ctx-basis b-partial">partial</span> mechanism in text, trigger not; '
+        + '<span class="ctx-basis b-derived">derived</span> clinical synthesis — present as local context only; '
+        + '<span class="ctx-basis b-none">counselling only</span> no clinical claim. '
+        + 'Hover a badge for the audit note.</div>';
+    }
+
+    ctxCards.innerHTML =
+      `<div class="ctx-card ctx-wide">${protosHtml}</div>`
+      + `<div class="ctx-card">${airHtml}</div>`
+      + `<div class="ctx-card">${weatherHtml}</div>`
+      + `<div class="ctx-card">${dengueHtml}</div>`
+      + `<div class="ctx-card">${miscHtml}</div>`;
+  }
+
+  function toggleCtx() {
+    const hidden = ctxDetail.classList.toggle('hidden');
+    ctxToggle.textContent = hidden ? 'Context ▸' : 'Context ▾';
+    ctxToggle.setAttribute('aria-expanded', String(!hidden));
+  }
+
+  function updateCtxLocation() {
+    const pc = document.getElementById('ctx-pc').value.trim();
+    const lat = parseFloat(document.getElementById('ctx-lat').value);
+    const lon = parseFloat(document.getElementById('ctx-lon').value);
+    const q = {};
+    if (isFinite(lat) && isFinite(lon)) { q.lat = lat; q.lon = lon; }
+    else if (pc) q.postcode = pc;
+    ctxQuery = q;
+    refreshContext();
+  }
+
+  function resetCtxLocation() {
+    document.getElementById('ctx-pc').value = '';
+    document.getElementById('ctx-lat').value = '';
+    document.getElementById('ctx-lon').value = '';
+    ctxQuery = {};
+    refreshContext();
+  }
+
   checkStatus();
+  refreshContext();
+  setInterval(refreshContext, CTX_REFRESH_MS);
 </script>
 </body>
 </html>
