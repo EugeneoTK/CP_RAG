@@ -115,7 +115,9 @@ async def chat(req: ChatRequest):
         result = await loop.run_in_executor(None, rag_chain.invoke, req.question)
     except Exception as e:
         raise HTTPException(status_code=502, detail="LLM request failed: %s" % e)
-    sources = list({doc.metadata.get("source", "") for doc in result["context"]})
+    # PDF chunks carry doc_title — show the guideline name, not the raw URL
+    sources = list({(doc.metadata.get("doc_title") or doc.metadata.get("source", ""))
+                    for doc in result["context"]})
     return ChatResponse(answer=result["answer"], sources=sources)
 
 

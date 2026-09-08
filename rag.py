@@ -175,9 +175,10 @@ def _embeddings() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(model=EMBED_MODEL, openai_api_base=OPENAI_BASE_URL)
 
 
-PROMPT_TEMPLATE = """Answer the question using only the three sections below. If they do not cover the question, say you don't know.
+PROMPT_TEMPLATE = """Answer the question using only the four sections below. If they do not cover the question, say you don't know.
 
 - "Protocol content": excerpts from the clinic's chronic-care protocols. This is the only material you may cite as protocol content. Where basis notes are given they state exactly what the protocol text does and does not support — do not over-claim beyond them.
+- "Clinical guidelines": Singapore ACE clinical guidelines (ACGs) and other uploaded clinical guidance PDFs. Cite them as guideline content — never as protocol content.
 - "Public health guidance": government public health guidance (e.g. MOH). You may cite it, but as public guidance — never as protocol content.
 - "Local context": live population-level signals (air quality, weather, dengue) for the clinic point. These are observations about the area right now, NOT protocol content: use them to frame the answer (environmental triggers, sick-day rules, counselling), but never attribute them to the protocols.
 
@@ -185,6 +186,9 @@ Formatting: the answer renders as PLAIN TEXT in a chat window — it has NO mark
 
 == Protocol content ==
 {protocol_content}
+
+== Clinical guidelines ==
+{guidelines}
 
 == Public health guidance ==
 {public_guidance}
@@ -341,7 +345,7 @@ def _steer_query(question: str, context_provider) -> str:
 def _prepare_sections(docs: list, question: str, context_provider) -> dict:
     """Split retrieved chunks by provenance and attach the live-context
     sections (basis rule: `derived`/`none` links never become protocol content)."""
-    protocol_parts, public_parts = [], []
+    protocol_parts, public_parts, guideline_parts = [], [], []
     for d in docs or []:
         site = d.metadata.get("source_site", "primarycarepages.sg")
         body = (d.page_content or "").strip()
@@ -352,6 +356,10 @@ def _prepare_sections(docs: list, question: str, context_provider) -> dict:
             public_parts.append(
                 "%s\n[%s — public health guidance, not clinic protocol content] %s"
                 % (body, site, ref))
+        elif site in GUIDELINE_SITES:
+            guideline_parts.append(
+                "%s\n[%s] %s"
+                % (body, d.metadata.get("doc_title", "guideline"), ref))
         else:
             protocol_parts.append("%s\n[%s] %s" % (body, site, ref))
 
@@ -376,6 +384,8 @@ def _prepare_sections(docs: list, question: str, context_provider) -> dict:
     return {
         "protocol_content": ("\n\n---\n\n".join(protocol_parts)
                              or "(no protocol content retrieved for this question)"),
+        "guidelines": ("\n\n---\n\n".join(guideline_parts)
+                       or "(no clinical guidelines retrieved for this question)"),
         "public_guidance": "\n\n---\n\n".join(public_parts) or "(none)",
         "local_context": local_ctx,
         "clinic": clinic,
