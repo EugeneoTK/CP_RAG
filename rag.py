@@ -164,7 +164,7 @@ def _store_url_index(vectorstore: Chroma):
     """(normalized-URL set, host set) of chunks already in the store
     (local read, 0 credits)."""
     urls, hosts = set(), set()
-    for m in vectorstore.get(include=["metadatas"]).get("metadatas") or []:
+    for m in _scan_metadatas(vectorstore):
         u = (m or {}).get("source")
         if not u:
             continue
@@ -205,6 +205,28 @@ Question: {question}
 def load_vectorstore() -> Chroma:
     embeddings = _embeddings()
     return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+
+
+# Inventory-scan cache (2026-09-09 debt fix): a full-metadata scan is O(n)
+# over the whole store, so cache it and invalidate on the doc count
+# (Chroma's count() is O(1)). The app only appends (or does a full rebuild
+# that changes the count; a same-corpus rebuild yields identical rows), so
+# a count change is the only in-process way the inventory can change.
+# 0 credits either way.
+_meta_scan_cache = None  # (doc_count, metadatas)
+
+
+def _scan_metadatas(vectorstore: Chroma):
+    """All chunk metadatas, cached until the store's doc count changes."""
+    global _meta_scan_cache
+    # count() via the underlying chromadb collection — the langchain
+    # wrapper exposes no count() of its own; O(1) in chromadb.
+    n = vectorstore._collection.count()
+    if _meta_scan_cache is not None and _meta_scan_cache[0] == n:
+        return _meta_scan_cache[1]
+    rows = vectorstore.get(include=["metadatas"]).get("metadatas") or []
+    _meta_scan_cache = (n, list(rows))
+    return _meta_scan_cache[1]
 
 
 def ingest() -> int:
@@ -265,7 +287,7 @@ def _store_pdf_index(vectorstore: Chroma):
     """(doc_hash set, normalized source-URL set) already in the store
     (local read, 0 credits) — dedupe for PDF ingest."""
     hashes, urls = set(), set()
-    for m in vectorstore.get(include=["metadatas"]).get("metadatas") or []:
+    for m in _scan_metadatas(vectorstore):
         m = m or {}
         if m.get("doc_hash"):
             hashes.add(m["doc_hash"])
@@ -306,7 +328,7 @@ def list_pdfs():
     """One row per ingested PDF: doc_hash, title, source, chunks."""
     vectorstore = load_vectorstore()
     agg = {}
-    for m in vectorstore.get(include=["metadatas"]).get("metadatas") or []:
+    for m in _scan_metadatas(vectorstore):
         m = m or {}
         if not m.get("doc_hash"):
             continue
@@ -356,7 +378,7 @@ def list_corpus():
     endpoint 503s on `rag_chain is None` before calling this.
     """
     vs = load_vectorstore()
-    rows = vs.get(include=["metadatas"]).get("metadatas") or []
+    rows = _scan_metadatas(vs)
     pdfs, web = {}, {}
     for m in rows:
         m = m or {}

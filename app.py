@@ -208,9 +208,18 @@ async def run_ingest_pdf(file: UploadFile = File(...),
     """Ingest one uploaded guideline PDF (parse + embed, dedupe by content
     hash). Parse/embed is blocking — executor per the no-freeze rule."""
     global rag_chain
-    data = await file.read()
-    if len(data) > MAX_PDF_BYTES:
-        raise HTTPException(status_code=400, detail="PDF exceeds 25 MB cap")
+    # Bounded read: stream 1 MB chunks and refuse at the cap, so an
+    # oversized upload is rejected with at most ~26 MB buffered — not
+    # the whole body in memory first (2026-09-09 debt fix).
+    data = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        data += chunk
+        if len(data) > MAX_PDF_BYTES:
+            raise HTTPException(status_code=400, detail="PDF exceeds 25 MB cap")
+    data = bytes(data)
     if data[:5] != b"%PDF-":
         raise HTTPException(status_code=400, detail="not a PDF file")
     t = title.strip() or (file.filename or "untitled.pdf")
