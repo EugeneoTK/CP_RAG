@@ -211,7 +211,7 @@
     .empty-state p { font-size: 0.9rem; }
 
     /* --- F2 context strip (Phase 1) ------------------------------------------- */
-    #ctx-strip { width: 100%; max-width: 800px; padding: 10px 16px 0; }
+    #ctx-strip { width: 100%; max-width: 800px; padding: 10px 0 0; }
 
     #ctx-bar {
       display: flex;
@@ -345,6 +345,61 @@
     #ctx-src { margin-top: 8px; font-size: 0.72rem; color: #94a3b8; }
     #ctx-src a { color: #1a56db; text-decoration: none; }
     #ctx-src a:hover { text-decoration: underline; }
+
+    /* --- Phase 6: tabs + brief view ------------------------------------------ */
+    #tabs { width: 100%; max-width: 800px; display: flex; gap: 6px; padding: 10px 16px 0; }
+    #tabs .tab { flex: 1; padding: 8px 0; font-size: 0.85rem; font-weight: 600;
+      background: #e2e8f0; color: #334155; border: none; border-radius: 8px; cursor: pointer; }
+    #tabs .tab:hover { background: #cbd5e1; }
+    #tabs .tab.active { background: #1a56db; color: #fff; }
+
+    main > section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    main > section[hidden] { display: none; }
+    #view-brief, #view-library { overflow-y: auto; gap: 12px; }
+    #view-chat { overflow: hidden; }
+
+    #brief-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    #brief-title { font-size: 1.05rem; font-weight: 600; }
+    #brief-stamp { font-size: 0.72rem; color: #64748b; }
+    #brief-cta-row { display: flex; align-items: center; gap: 10px; }
+    #brief-generate { padding: 8px 14px; font-size: 0.85rem; font-weight: 600;
+      background: #1a56db; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+    #brief-generate:hover { background: #1e40af; }
+    #brief-generate:disabled { background: #94a3b8; cursor: default; }
+    #brief-progress { font-size: 0.75rem; color: #64748b; }
+    .brief-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+      border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; }
+
+    .brief-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .tile { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      padding: 10px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-top: 3px solid #94a3b8; }
+    .tile.good { border-top-color: #16a34a; }
+    .tile.warn { border-top-color: #d97706; }
+    .tile.bad  { border-top-color: #dc2626; }
+    .tile .t { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
+    .tile .v { font-size: 1.05rem; font-weight: 600; margin-top: 2px; }
+    .tile .s { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+
+    .brief-headline { font-size: 1.25rem; font-weight: 600; line-height: 1.4; }
+    .brief-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: #64748b; margin-top: 14px; }
+    .watch-card { background: #fff; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8;
+      border-radius: 10px; padding: 10px 12px; margin-top: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .watch-card .f { font-weight: 600; font-size: 0.9rem; }
+    .watch-card .w { font-size: 0.85rem; color: #334155; margin-top: 2px; }
+    .watch-card .a { font-size: 0.85rem; margin-top: 2px; }
+    .watch-card .a b { color: #1a56db; }
+    .watch-card.src-nea { border-left-color: #1a56db; }
+    .watch-card.src-dgsg { border-left-color: #0e7490; }
+    .watch-card.src-widb { border-left-color: #b45309; }
+    .watch-card.src-ura { border-left-color: #15803d; }
+    .brief-src { display: inline-block; font-size: 0.7rem; background: #f1f5f9; color: #334155;
+      border-radius: 999px; padding: 2px 8px; margin-top: 6px; }
+    .brief-outlook { font-size: 0.95rem; line-height: 1.5; }
+    .brief-prose { background: #fffbeb; border-left: 4px solid #d97706; border-radius: 8px;
+      padding: 10px 12px; font-size: 0.88rem; white-space: pre-wrap; }
+    .brief-footer { font-size: 0.72rem; color: #64748b; margin-top: 12px; line-height: 1.5; }
+    .spot-empty { font-size: 0.85rem; color: #16a34a; }
   </style>
 </head>
 <body>
@@ -357,59 +412,84 @@
   <span id="status-badge">Checking...</span>
 </header>
 
-<section id="ctx-strip">
-  <div id="ctx-bar">
-    <button id="ctx-toggle" onclick="toggleCtx()" aria-expanded="true">Context ▾</button>
-    <div id="ctx-chips"><span class="ctx-chip muted">Loading context…</span></div>
-    <span id="ctx-stamp"></span>
-    <button id="ctx-refresh" class="ctx-icobtn" onclick="refreshContext()" title="Refresh context">⟳</button>
-  </div>
-  <div id="ctx-detail">
-    <div id="ctx-cards" class="ctx-cards"></div>
-    <div id="ctx-locbar">
-      <span>Clinic:</span>
-      <input id="ctx-pc" placeholder="Postcode" maxlength="6">
-      <input id="ctx-lat" placeholder="Lat" type="number" step="any">
-      <input id="ctx-lon" placeholder="Lon" type="number" step="any">
-      <button class="ctx-sm" onclick="updateCtxLocation()">Update</button>
-      <button class="ctx-sm" onclick="resetCtxLocation()">Default</button>
-    </div>
-    <div id="ctx-src">
-      Live population-level data from data.gov.sg (Singapore Open Data License) ·
-      <a href="https://api-open.data.gov.sg" target="_blank" rel="noopener">api-open.data.gov.sg</a>
-    </div>
-  </div>
-</section>
+<nav id="tabs">
+  <button class="tab" data-tab="brief" onclick="switchTab('brief')">Brief</button>
+  <button class="tab" data-tab="chat" onclick="switchTab('chat')">Chat</button>
+  <button class="tab" data-tab="library" onclick="switchTab('library')">Library</button>
+</nav>
 
 <main>
-  <div id="ingest-bar" style="display:none">
-    Knowledge base not found. Run ingestion to scrape and index the care protocols.
-    <button id="ingest-btn" onclick="runIngest()">Run Ingestion</button>
-  </div>
-
-  <div id="pdf-bar">
-    <span class="pdf-label">Clinical guidelines</span>
-    <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
-      accept="application/pdf,.pdf" style="display:none" onchange="uploadPdf(this)"></label>
-    <span id="pdf-status"></span>
-    <span id="pdf-count"></span>
-  </div>
-
-  <div id="chat-window">
-    <div class="empty-state" id="empty-state">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-          d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 01-4-.833L3 20l1.167-4A8.002 8.002 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-      </svg>
-      <p>Ask a question about Singapore's chronic care protocols.</p>
+  <section id="view-brief">
+    <div id="brief-head">
+      <div id="brief-title-row">
+        <span id="brief-title">Clinic brief</span>
+        <span id="brief-stamp"></span>
+      </div>
+      <div id="ctx-locbar">
+        <span>Clinic:</span>
+        <input id="ctx-pc" placeholder="Postcode" maxlength="6">
+        <input id="ctx-lat" placeholder="Lat" type="number" step="any">
+        <input id="ctx-lon" placeholder="Lon" type="number" step="any">
+        <button class="ctx-sm" onclick="updateCtxLocation()">Update</button>
+        <button class="ctx-sm" onclick="resetCtxLocation()">Default</button>
+      </div>
+      <div id="brief-cta-row">
+        <button id="brief-generate" onclick="generateBrief()">Generate Brief</button>
+        <span id="brief-progress"></span>
+      </div>
     </div>
-  </div>
+    <div id="brief-tiles" class="brief-tiles"></div>
+    <div id="brief-error" class="brief-error" hidden></div>
+    <div id="brief-content"></div>
+    <section id="ctx-strip">
+      <div id="ctx-bar">
+        <button id="ctx-toggle" onclick="toggleCtx()" aria-expanded="false">Raw context data ▸</button>
+        <div id="ctx-chips"><span class="ctx-chip muted">Loading context…</span></div>
+        <span id="ctx-stamp"></span>
+        <button id="ctx-refresh" class="ctx-icobtn" onclick="refreshContext()" title="Refresh context">⟳</button>
+      </div>
+      <div id="ctx-detail" class="hidden">
+        <div id="ctx-cards" class="ctx-cards"></div>
+        <div id="ctx-src">
+          Live population-level data from data.gov.sg (Singapore Open Data License) ·
+          <a href="https://api-open.data.gov.sg" target="_blank" rel="noopener">api-open.data.gov.sg</a>
+        </div>
+      </div>
+    </section>
+  </section>
+  <section id="view-chat" hidden>
+    <div id="ingest-bar" style="display:none">
+      Knowledge base not found. Run ingestion to scrape and index the care protocols.
+      <button id="ingest-btn" onclick="runIngest()">Run Ingestion</button>
+    </div>
 
-  <div id="input-area">
-    <textarea id="question" placeholder="Ask about care protocols..." rows="1"
-      onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-    <button id="send-btn" onclick="sendMessage()">Send</button>
-  </div>
+    <div id="pdf-bar">
+      <span class="pdf-label">Clinical guidelines</span>
+      <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
+        accept="application/pdf,.pdf" style="display:none" onchange="uploadPdf(this)"></label>
+      <span id="pdf-status"></span>
+      <span id="pdf-count"></span>
+    </div>
+
+    <div id="chat-window">
+      <div class="empty-state" id="empty-state">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 01-4-.833L3 20l1.167-4A8.002 8.002 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <p>Ask a question about Singapore's chronic care protocols.</p>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <textarea id="question" placeholder="Ask about care protocols..." rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </section>
+  <section id="view-library" hidden>
+    <div id="library"><div class="empty-state" style="flex:none;padding:20px 0"><p>Library</p></div></div>
+  </section>
 </main>
 
 <script>
@@ -593,6 +673,35 @@
 
   let ctxQuery = {};            // {} => server default (test clinic)
   let ctxLoading = false;
+
+  // --- Phase 6: tabs + brief ------------------------------------------------
+  let lastSnap = null;           // latest snapshot; renderContext() sets it
+  let brief = { status: 'none', data: null, generating: false };
+  const SRC_CLASS = { 'NEA': 'nea', 'data.gov.sg': 'dgsg', 'CDA WIDB': 'widb', 'URA': 'ura' };
+
+  const TABS = ['brief', 'chat', 'library'];
+  function currentTab() {
+    const t = (location.hash || '').replace(/^#\//, '');
+    return TABS.includes(t) ? t : 'brief';
+  }
+  function applyTab(tab) {
+    document.getElementById('view-brief').hidden = tab !== 'brief';
+    document.getElementById('view-chat').hidden = tab !== 'chat';
+    document.getElementById('view-library').hidden = tab !== 'library';
+    document.querySelectorAll('#tabs .tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.tab === tab));
+    if (tab === 'brief') {
+      if (!lastSnap) refreshContext();   // first visit: populate tiles (free)
+      loadBrief();                       // free GET — never a POST (credit guard)
+    }
+    if (tab === 'library' && typeof loadLibrary === 'function') loadLibrary();
+    // Task 4 removes the typeof guard once loadLibrary() exists.
+  }
+  function switchTab(tab) {
+    if (location.hash !== '#/' + tab) location.hash = '#/' + tab;
+    else applyTab(tab);
+  }
+  window.addEventListener('hashchange', () => applyTab(currentTab()));
   const CTX_REFRESH_MS = 15 * 60 * 1000;
 
   async function refreshContext() {
@@ -624,6 +733,7 @@
   function heatCls(v) { return v === 'High' ? 'bad' : (v === 'Moderate' ? 'warn' : 'good'); }
 
   function renderContext(snap, cached) {
+    lastSnap = snap;
     const c = (snap.meta || {}).clinic || {};
     const aq = snap.air_quality || {};
     const w = snap.weather || {};
@@ -775,11 +885,212 @@
       + `<div class="ctx-card">${widbHtml}</div>`
       + `<div class="ctx-card">${uraHtml}</div>`
       + `<div class="ctx-card">${miscHtml}</div>`;
+    renderBriefTiles(snap);
+    renderSpotlight(snap);
+  }
+
+  function gapFor(snap, prefixes) {
+    return (snap.data_gaps || []).find(g => prefixes.some(p => g.startsWith(p)));
+  }
+  function tileHtml(title, cls, value, sub) {
+    return `<div class="tile ${cls}"><div class="t">${title}</div>`
+      + `<div class="v">${value}</div><div class="s">${sub || ''}</div></div>`;
+  }
+  function renderBriefTiles(snap) {
+    const el = document.getElementById('brief-tiles');
+    const c = (snap.meta || {}).clinic || {};
+    const aq = snap.air_quality || {}, w = snap.weather || {}, d = snap.dengue || {};
+    const dw = snap.disease_week || {}, cc = snap.catchment_change || {}, ns = snap.nearest_services || {};
+    if (c.name) document.getElementById('brief-title').textContent = 'Brief — ' + c.name;
+    const gap = g => gapFor(snap, g);
+    let tiles = '';
+    // Air (PSI) — good ≤50 · warn 51–100 · bad >100
+    const airGap = gap(['psi', 'pm25']);
+    if (airGap) tiles += tileHtml('Air', 'warn', 'unavailable', escapeHtml(airGap));
+    else if (aq.psi && aq.psi.peak != null) {
+      const cls = aq.psi.peak > 100 ? 'bad' : (aq.psi.peak >= 51 ? 'warn' : 'good');
+      const sub = (aq.psi.peak_region || '')
+        + ((aq.pm25 && aq.pm25.peak != null) ? ' · PM2.5 ' + aq.pm25.peak.toFixed(0) : '');
+      tiles += tileHtml('Air (PSI)', cls, String(aq.psi.peak), escapeHtml(sub));
+    } else tiles += tileHtml('Air', '', 'no signal', 'PSI unavailable');
+    // Weather — warn if a flood alert is present, else good
+    const wGap = gap(['forecast_24hr', 'wbgt', 'flood_alerts', 'outlook_4day']);
+    if (wGap) tiles += tileHtml('Weather', 'warn', 'unavailable', escapeHtml(wGap));
+    else if (w.today) {
+      const nFlood = (w.flood && (w.flood.active_alerts || []).length) || 0;
+      const cls = nFlood ? 'warn' : 'good';
+      const sub = w.town_2hr
+        ? escapeHtml(w.town_2hr.town || '') + ' 2hr: ' + escapeHtml(w.town_2hr.forecast || '')
+        : escapeHtml(w.today.text || '');
+      tiles += tileHtml('Weather', cls, w.today.high_c + '°/' + w.today.low_c + '°' + (nFlood ? ' ⚠' : ''), sub);
+    } else tiles += tileHtml('Weather', '', 'no signal', 'forecast unavailable');
+    // Dengue nearby — bad if any nearby cluster ≥3 cases · warn if high-aedes
+    // or a small nearby cluster · good otherwise
+    const dGap = gap(['dengue_clusters', 'aedes_areas']);
+    const near = d.nearby_clusters || [];
+    if (dGap) tiles += tileHtml('Dengue nearby', 'warn', 'unavailable', escapeHtml(dGap));
+    else if (near.some(x => (x.case_size || 0) >= 3))
+      tiles += tileHtml('Dengue nearby', 'bad', Math.max(...near.map(x => x.case_size || 0)) + ' cases',
+        escapeHtml(near[0].locality || '') + ' ' + near[0].km + ' km');
+    else if (near.length || d.in_high_aedes_area)
+      tiles += tileHtml('Dengue nearby', 'warn',
+        near.length ? (near[0].case_size || 0) + ' cases' : 'no nearby clusters',
+        (d.in_high_aedes_area ? 'high aedes area' : escapeHtml(near[0].locality || ''))
+          + (d.clusters_active_total != null ? ' · ' + d.clusters_active_total + ' active island-wide' : ''));
+    else tiles += tileHtml('Dengue nearby', 'good', 'no clusters',
+      d.clusters_active_total != null ? d.clusters_active_total + ' active island-wide' : '');
+    // WIDB week — bad if week > 1.5×5-yr median · warn if > median · else neutral
+    const wdGap = gap(['widb']);
+    const dwD = dw.dengue || {}, flu = (dw.influenza || {}).ili_positivity_pct;
+    if (wdGap) tiles += tileHtml('WIDB week', 'warn', 'unavailable', escapeHtml(wdGap));
+    else if (dwD.week != null) {
+      let cls = '';
+      if (dwD.median_5yr != null) cls = dwD.week > 1.5 * dwD.median_5yr ? 'bad'
+        : (dwD.week > dwD.median_5yr ? 'warn' : 'good');
+      const sub = (dw.epi_week || '') + (dwD.median_5yr != null ? ' · 5yr median ' + dwD.median_5yr : '')
+        + (flu != null ? ' · flu ILI ' + flu + '%' : '');
+      tiles += tileHtml('WIDB week', cls, dwD.week + ' dengue cases', escapeHtml(sub));
+    } else tiles += tileHtml('WIDB week', '', 'no signal', 'bulletin unavailable');
+    // Planning 90d — informational; sub-line: permission ≠ opened facility
+    const pGap = gap(['ura']);
+    if (pGap) tiles += tileHtml('Planning 90d', 'warn', 'unavailable', escapeHtml(pGap));
+    else if (cc.healthcare_decisions_90d_count != null)
+      tiles += tileHtml('Planning 90d', '', cc.healthcare_decisions_90d_count + ' decisions',
+        'permission ≠ opened facility');
+    else tiles += tileHtml('Planning 90d', '', 'no signal', 'URA unavailable');
+    // Nearest polyclinic — neutral: name + km
+    const nGap = gap(['polyclinics']);
+    const py = (ns.pyclinics || [])[0];
+    if (nGap) tiles += tileHtml('Nearest polyclinic', 'warn', 'unavailable', escapeHtml(nGap));
+    else if (py) tiles += tileHtml('Nearest polyclinic', '', py.km + ' km', escapeHtml(py.name || ''));
+    else tiles += tileHtml('Nearest polyclinic', '', 'no data', '');
+    el.innerHTML = tiles;
+  }
+
+  const SPOT_BASIS = {
+    corpus: 'in protocol text', partial: 'partial: mechanism in text',
+    derived: 'derived: not protocol text', none: 'counselling only'
+  };
+  function renderSpotlight(snap) {
+    const el = document.getElementById('brief-spotlight');
+    if (!el || !snap) return;
+    const active = ((snap.protocol_links || {}).active) || [];
+    el.innerHTML = active.length
+      ? active.map(l => {
+          const b = SPOT_BASIS[l.basis] ? l.basis : 'derived';
+          return `<div class="watch-card"><div class="f">${escapeHtml(l.signal || '')}</div>`
+            + `<div class="w">${escapeHtml(l.detail || '')} `
+            + `<span class="ctx-basis b-${b}" title="${escapeHtml(l.basis_note || '')}">${SPOT_BASIS[b]}</span></div>`
+            + `<div class="ctx-protos">${(l.protocols || []).map(p =>
+                `<span class="ctx-proto">${escapeHtml(p)}</span>`).join('')}</div>`
+            + (l.population_counselling
+                ? `<div class="a">Counsel: ${escapeHtml(l.population_counselling)}</div>` : '')
+            + '</div>';
+        }).join('')
+      : '<div class="spot-empty">No elevated signals — all context signals within normal range.</div>';
+  }
+
+  async function loadBrief() {
+    try {
+      const qs = new URLSearchParams(ctxQuery).toString();
+      const res = await fetch('/api/brief' + (qs ? '?' + qs : ''));
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      brief.data = d;
+      renderBrief(d);
+    } catch (e) {
+      const err = document.getElementById('brief-error');
+      err.hidden = false;
+      err.textContent = 'Brief status unavailable: ' + (e.message || e);
+    }
+  }
+
+  function renderBrief(d) {
+    const errEl = document.getElementById('brief-error');
+    const btn = document.getElementById('brief-generate');
+    const stamp = document.getElementById('brief-stamp');
+    errEl.hidden = true;
+    if (d.last_error) { errEl.hidden = false; errEl.textContent = 'Last generation failed: ' + d.last_error; }
+    if (d.status === 'fresh') { btn.textContent = 'Regenerate (costs 1 LLM call)'; btn.dataset.force = '1'; }
+    else { btn.textContent = 'Generate Brief'; btn.dataset.force = '0'; }
+    if (d.as_of) stamp.textContent = 'brief as of ' + new Date(d.as_of).toLocaleString();
+
+    const c = document.getElementById('brief-content');
+    const b = d.brief;
+    if (!b) {
+      c.innerHTML = '<div class="empty-state" style="flex:none;padding:12px 0"><p>'
+        + 'No brief yet — the tiles above are live data. Generate Brief adds the inference '
+        + 'layer (1 LLM call, 0 embeddings, cached 15 min).</p></div>';
+      return;
+    }
+    const drops = d.provenance_drops || 0;
+    const gaps = (lastSnap && lastSnap.data_gaps) ? lastSnap.data_gaps : [];
+    let html = '<div class="brief-headline">' + escapeHtml(b.headline || '') + '</div>';
+    if (b.parse_error) {   // degraded: unparseable LLM output → labelled prose
+      html += '<div class="brief-section-title">Watch today</div>'
+        + '<div class="brief-prose">' + escapeHtml(b.raw || '') + '</div>'
+        + '<div class="brief-footer">Unstructured model output — shown as-is (JSON parse failed).</div>';
+      c.innerHTML = html;
+      renderSpotlight(lastSnap);
+      return;
+    }
+    html += '<div class="brief-section-title">Watch today</div>';
+    if (!b.watch.length) html += '<div class="watch-card"><div class="w">No AI items passed the '
+      + 'provenance check — see the tiles and Protocol spotlight above.</div></div>';
+    html += b.watch.map(it =>
+      `<div class="watch-card src-${SRC_CLASS[it.source] || ''}">`
+      + `<div class="f">${escapeHtml(it.finding)}</div>`
+      + `<div class="w">${escapeHtml(it.why_it_matters)}</div>`
+      + `<div class="a"><b>Action:</b> ${escapeHtml(it.action)}</div>`
+      + `<span class="brief-src">${escapeHtml(it.source || 'derived')}</span></div>`).join('');
+    html += '<div class="brief-section-title">Protocol spotlight</div><div id="brief-spotlight"></div>';
+    if (b.outlook) html += '<div class="brief-section-title">Outlook</div>'
+      + '<div class="brief-outlook">' + escapeHtml(b.outlook) + '</div>';
+    html += '<div class="brief-footer">'
+      + (gaps.length ? 'Data gaps: ' + gaps.map(escapeHtml).join(' · ') : 'All sources OK')
+      + (drops ? ' · ' + drops + ' watch item(s) withheld by the provenance check' : '')
+      + '<br>Generated from live data ' + (d.as_of || '')
+      + ' · 1 LLM call (≤2 provider round-trips, 0 embeddings) · cached 15 min</div>';
+    c.innerHTML = html;
+    renderSpotlight(lastSnap);
+  }
+
+  async function generateBrief() {
+    if (brief.generating) return;               // double-click guard (client side)
+    brief.generating = true;
+    const btn = document.getElementById('brief-generate');
+    const prog = document.getElementById('brief-progress');
+    const force = btn.dataset.force === '1';
+    btn.disabled = true;
+    const t0 = Date.now();
+    prog.textContent = 'Fetching live data… 0s';
+    const timer = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      prog.textContent = (s < 15 ? 'Fetching live data… ' : 'Writing brief… ') + s + 's';
+    }, 1000);
+    try {
+      const qs = new URLSearchParams(ctxQuery).toString();
+      const res = await fetch('/api/brief/generate' + (qs ? '?' + qs + '&' : '?')
+        + 'force=' + (force ? 1 : 0), { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      renderBrief({ status: 'fresh', last_error: null, as_of: d.as_of,
+                    brief: d.brief, provenance_drops: d.provenance_drops || 0 });
+    } catch (e) {
+      const err = document.getElementById('brief-error');
+      err.hidden = false;
+      err.textContent = 'Generate failed: ' + (e.message || e);
+    } finally {
+      clearInterval(timer);
+      btn.disabled = false;
+      brief.generating = false;
+      prog.textContent = '';
+    }
   }
 
   function toggleCtx() {
     const hidden = ctxDetail.classList.toggle('hidden');
-    ctxToggle.textContent = hidden ? 'Context ▸' : 'Context ▾';
+    ctxToggle.textContent = hidden ? 'Raw context data ▸' : 'Raw context data ▾';
     ctxToggle.setAttribute('aria-expanded', String(!hidden));
   }
 
@@ -792,6 +1103,7 @@
     else if (pc) q.postcode = pc;
     ctxQuery = q;
     refreshContext();
+    loadBrief();
   }
 
   function resetCtxLocation() {
@@ -800,10 +1112,12 @@
     document.getElementById('ctx-lon').value = '';
     ctxQuery = {};
     refreshContext();
+    loadBrief();
   }
 
   checkStatus();
   refreshContext();
+  applyTab(currentTab());
   setInterval(refreshContext, CTX_REFRESH_MS);
   // Re-poll status while not ready (e.g. server restarted mid-session):
   // without this, a failed first probe leaves the send button disabled.
