@@ -400,6 +400,21 @@
       padding: 10px 12px; font-size: 0.88rem; white-space: pre-wrap; }
     .brief-footer { font-size: 0.72rem; color: #64748b; margin-top: 12px; line-height: 1.5; }
     .spot-empty { font-size: 0.85rem; color: #16a34a; }
+
+    /* --- Phase 6: library view ------------------------------------------------ */
+    #lib-totals { font-size: 0.85rem; font-weight: 600; background: #fff;
+      border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .lib-h { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+    .pdf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    .lib-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+      padding: 8px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .lib-card .f, .lib-row .f { font-weight: 600; font-size: 0.85rem; }
+    .lib-card .s, .lib-row .s { font-size: 0.75rem; color: #64748b; }
+    .lib-row { padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.8rem; }
+    .lib-row a, .lib-card a { color: #1a56db; text-decoration: none; word-break: break-all; }
+    .lib-row a:hover, .lib-card a:hover { text-decoration: underline; }
+    .s.dim { color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -463,14 +478,6 @@
       <button id="ingest-btn" onclick="runIngest()">Run Ingestion</button>
     </div>
 
-    <div id="pdf-bar">
-      <span class="pdf-label">Clinical guidelines</span>
-      <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
-        accept="application/pdf,.pdf" style="display:none" onchange="uploadPdf(this)"></label>
-      <span id="pdf-status"></span>
-      <span id="pdf-count"></span>
-    </div>
-
     <div id="chat-window">
       <div class="empty-state" id="empty-state">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -488,6 +495,13 @@
     </div>
   </section>
   <section id="view-library" hidden>
+    <div id="pdf-bar">
+      <span class="pdf-label">Clinical guidelines</span>
+      <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
+        accept="application/pdf,.pdf" style="display:none" onchange="uploadPdf(this)"></label>
+      <span id="pdf-status"></span>
+      <span id="pdf-count"></span>
+    </div>
     <div id="library"><div class="empty-state" style="flex:none;padding:20px 0"><p>Library</p></div></div>
   </section>
 </main>
@@ -639,6 +653,7 @@
         ? 'Already in store (duplicate)'
         : 'Added ' + data.chunks_added + ' chunks';
       refreshPdfs();
+      if (typeof loadLibrary === 'function') loadLibrary();
     } catch (e) {
       status.textContent = 'Upload failed: ' + e.message;
     } finally {
@@ -646,6 +661,68 @@
     }
   }
   refreshPdfs();
+
+  // --- Phase 6: library ------------------------------------------------------
+  let lastLibrary = null;
+  async function loadLibrary() {
+    const el = document.getElementById('library');
+    if (!el) return;
+    try {
+      const res = await fetch('/api/library');
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      lastLibrary = d;
+      renderLibrary(d);
+    } catch (e) {
+      el.innerHTML = '<div class="brief-error">Library unavailable: '
+        + escapeHtml(String(e.message || e)) + '</div>';
+    }
+  }
+  function renderLibrary(d) {
+    const el = document.getElementById('library');
+    const t = d.totals || {};
+    const docs = (t.guideline_pdfs || 0) + (t.protocol_pages || 0) + (t.public_guidance_pages || 0);
+    let html = '<div id="lib-totals">' + t.chunks + ' chunks · ' + docs + ' documents: '
+      + (t.guideline_pdfs || 0) + ' guideline PDFs · ' + (t.protocol_pages || 0)
+      + ' protocol pages · ' + (t.public_guidance_pages || 0) + ' guidance pages</div>';
+
+    html += '<h3 class="lib-h">Clinical guideline PDFs</h3><div class="pdf-grid">';
+    html += (d.pdfs || []).map(p => {
+      const src = p.source || '';
+      const link = /^https?:/.test(src)
+        ? ' <a class="s" href="' + escapeHtml(src) + '" target="_blank" rel="noopener">source</a>' : '';
+      return '<div class="lib-card"><div class="f">' + escapeHtml(p.title || 'Untitled PDF') + '</div>'
+        + '<div class="s">' + p.chunks + ' chunks' + link
+        + (p.doc_hash ? ' · <span title="' + escapeHtml(p.doc_hash) + '">' + escapeHtml(p.doc_hash.slice(0, 8)) + '</span>' : '')
+        + '</div></div>';
+    }).join('');
+    html += '</div>';
+
+    const webSec = (name, rows, otherCount) => {
+      let h = '<h3 class="lib-h">' + name + '</h3>';
+      if (!rows || !rows.length) { h += '<div class="s dim">none in corpus</div>'; return h; }
+      if (rows.length > 25) {   // URL-sprawl collapse rule (spec §9)
+        h += '<div class="lib-card"><div class="s">' + rows.length
+          + ' pages — collapsed (URL sprawl). Full list: `curl /api/library`.</div></div>';
+        if (otherCount) h += '<div class="s dim" style="margin-top:4px">' + otherCount
+          + ' other pages on this site (nav / crawl context) — not protocol content.</div>';
+        return h;
+      }
+      h += rows.map(r => '<div class="lib-row"><span class="f">' + escapeHtml(r.derived_title) + '</span> '
+        + '<a class="s" href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">'
+        + escapeHtml(r.url) + '</a> <span class="s dim">' + r.chunks + ' chunks</span></div>').join('');
+      return h;
+    };
+    const ws = d.web_sources || {};
+    // Protocol section = care-protocol URLs only (the depth-2 crawl also
+    // captured site nav pages; they stay countable, never listed as protocols).
+    const pcs = ws['primarycarepages.sg'] || [];
+    const proto = pcs.filter(r => r.url.indexOf('/care-protocols/') !== -1);
+    html += webSec('Care-protocol pages (primarycarepages.sg)',
+      proto.length ? proto : null, pcs.length - proto.length);
+    html += webSec('Public health guidance (moh.gov.sg)', ws['moh.gov.sg']);
+    el.innerHTML = html;
+  }
 
   function handleKey(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -694,8 +771,7 @@
       if (!lastSnap) refreshContext();   // first visit: populate tiles (free)
       loadBrief();                       // free GET — never a POST (credit guard)
     }
-    if (tab === 'library' && typeof loadLibrary === 'function') loadLibrary();
-    // Task 4 removes the typeof guard once loadLibrary() exists.
+    if (tab === 'library') loadLibrary();
   }
   function switchTab(tab) {
     if (location.hash !== '#/' + tab) location.hash = '#/' + tab;

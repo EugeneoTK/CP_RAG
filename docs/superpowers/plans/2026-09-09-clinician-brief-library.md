@@ -1282,12 +1282,14 @@ function renderLibrary(d) {
   }).join('');
   html += '</div>';
 
-  const webSec = (name, rows) => {
+  const webSec = (name, rows, otherCount) => {
     let h = '<h3 class="lib-h">' + name + '</h3>';
     if (!rows || !rows.length) { h += '<div class="s dim">none in corpus</div>'; return h; }
     if (rows.length > 25) {   // URL-sprawl collapse rule (spec §9)
       h += '<div class="lib-card"><div class="s">' + rows.length
         + ' pages — collapsed (URL sprawl). Full list: `curl /api/library`.</div></div>';
+      if (otherCount) h += '<div class="s dim" style="margin-top:4px">' + otherCount
+        + ' other pages on this site (nav / crawl context) — not protocol content.</div>';
       return h;
     }
     h += rows.map(r => '<div class="lib-row"><span class="f">' + escapeHtml(r.derived_title) + '</span> '
@@ -1296,7 +1298,12 @@ function renderLibrary(d) {
     return h;
   };
   const ws = d.web_sources || {};
-  html += webSec('Care-protocol pages (primarycarepages.sg)', ws['primarycarepages.sg']);
+  // Protocol section = care-protocol URLs only (the depth-2 crawl also
+  // captured site nav pages; they stay countable, never listed as protocols).
+  const pcs = ws['primarycarepages.sg'] || [];
+  const proto = pcs.filter(r => r.url.indexOf('/care-protocols/') !== -1);
+  html += webSec('Care-protocol pages (primarycarepages.sg)',
+    proto.length ? proto : null, pcs.length - proto.length);
   html += webSec('Public health guidance (moh.gov.sg)', ws['moh.gov.sg']);
   el.innerHTML = html;
 }
