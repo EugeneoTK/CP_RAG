@@ -207,6 +207,7 @@ GET .../weather/flood-alerts                # 200, PUB flood alert event feed
 (Phases 0, 2, 5 as above; **Phase 3 — WIDB: DONE 2026-09-08** — `context/widb.py`: archive crawl → walk-back PDF fetch → pypdf parser → `disease_week` block; WIDB line in *Local context*; CLI `DISEASE` section; UI chip + card. Build notes in §14.)
 | 4 — URA | F6 planning-decision catchment block (`URA_ACCESS_KEY` in .env) — **DONE + live-verified 2026-09-08** (2,363 rows / 74 healthcare-related in the 90-day window, §15) (`context/ura.py`: daily token → `Planning_Decision&last_dnload_date=<today−90d>`; healthcare keyword filter on `submission_desc`; 24 h disk cache; `catchment_change` snapshot block = island-wide healthcare-related written permissions, latest 20, each with `decision_type` — NOT opened facilities; *Local context* prompt line; CLI `PLANNING` section; UI chip + card; no key → `ura:` data gap). Sketch deviation: `new_resi_units_approved_region` dropped (no units field in the service; regional aggregation needs OneMap geocoding — deferred, §15) | 0 credits |
 | 5 — ACE guidelines | Clinical-guidelines PDFs in the RAG corpus: `pypdf` extraction, append-only `ingest_pdf()` with hash dedupe, `POST /api/ingest-pdf` + `GET /api/pdfs`, 4th prompt section "Clinical guidelines", UI upload bar, optional `scripts/ace_guidelines.py` sitemap crawler for all 29 ACE ACGs. Plan: `docs/superpowers/plans/2026-09-08-ace-guidelines-pdf.md` — **DONE 2026-09-08** (manual-upload path + full seed: 96 guideline PDFs / 2,975 guideline chunks in the store; 1 scanned appendix uningested) | ~1–2 credits (upload path) / a few cents (full ACE seed) |
+| 6 — Clinician brief + Library | On-demand one-page clinician brief (headline / watch list / outlook) from the live snapshot + 6 KPI tiles + structured-only Protocol spotlight; three hash-routed tabs (Brief default / Chat / Library); `GET /api/library` corpus inventory + Library UI (PDF grid, protocol collapse card, MOH section). Plan: `docs/superpowers/plans/2026-09-09-clinician-brief-library.md`; spec: `docs/superpowers/specs/2026-09-09-clinician-brief-library-design.md` — **DONE 2026-09-09** (`context/brief.py` prompt projection with `protocol_links` structurally excluded; `rag.py` `generate_brief()` + parse + provenance drop guard; `app.py` two-phase brief API with the full guard order + `GET /api/library`; UI tabs / tiles / renderer / Library view; build notes in §16) | exactly 1 paid call planned — **2 consumed** (snapshot-rotation probe deviation, §16) |
 
 ## 10. URA e-Services API — `eservice.ura.gov.sg` (access key VERIFIED 2026-09-08)
 
@@ -543,4 +544,105 @@ Follow-ups (not built): catchment geocoding of `address` (OneMap free key
 or street→region table) for per-clinic distance; residential-unit counts
 (URA's separate `Private_Residential_Properties` services, if the signal
 warrants them); rejected-vs-approved split chip in the UI.
+
+## 16. Phase 6 build notes (clinician brief dashboard + Library, 2026-09-09)
+
+Spec: `docs/superpowers/specs/2026-09-09-clinician-brief-library-design.md`
+(approved v2); plan: `docs/superpowers/plans/2026-09-09-clinician-brief-library.md`;
+SDD ledger: `.superpowers/sdd/2026-09-09-clinician-brief-library/ledger.md`
+(local-only, gitignored).
+
+**What was built.** The chat page is now three hash-routed tabs —
+`#/brief` (default), `#/chat`, `#/library` (bogus hashes fall back to brief).
+The Brief tab is a clinician dashboard: 6 KPI tiles from the live snapshot
+(Air / Weather / Dengue / WIDB / Planning / Nearest polyclinic, each with
+gap and degraded states per the spec's D10), a Generate/Regenerate CTA, and
+the generated brief (headline, up-to-6 watch cards with sources, Outlook,
+provenance-drop footer). The Protocol spotlight is rendered 100% from the
+structured `snapshot.protocol_links.active` — never from LLM text. The old
+context strip survives verbatim in the Brief view as the collapsed
+"Raw context data" drill-down (its DOM nodes are never removed — the
+15-min auto-refresh intervals depend on them). The Library tab lists the
+corpus: totals line, guideline-PDF card grid (title, chunks, source link,
+doc-hash prefix), care-protocol pages, and MOH public guidance; the PDF
+upload bar moved here from Chat.
+
+**`context/brief.py`** (new, stdlib-only, pure): builds the brief prompt
+from the snapshot with a *projection* — `protocol_links` is structurally
+absent from the LLM payload (asserted in dry runs). The LLM returns strict
+JSON `{headline, watch[], outlook}`.
+
+**`rag.py`**: `generate_brief()` (one chat-model call, no retrieval, no
+embeddings), `_parse_brief()` (fence-strip, strict JSON, type coercion,
+watch list clipped to 6), `_apply_provenance_guard()` — server-side drop of
+any watch item mentioning `protocol`, `guideline`, or a known protocol name
+(`provenance_drops` counted in the response).
+
+**`app.py`**: brief cache state (in-memory, keyed on 3-dp clinic coords,
+tied to the snapshot's `generated_at`; restart = cold) +
+`GET /api/brief` (free, never builds) + `POST /api/brief/generate` —
+**the only LLM path outside `/api/chat`**, guard order per spec §7.2:
+invalid point → 400; `rag_chain is None` → 503; fresh cache & no force →
+cached (0 credits); cached error → 502 (90-s failure sentinel); in-flight
+build → await the shared future (D5 stampede guard); force inside 60 s →
+429 + `Retry-After` (D6 cooldown); otherwise thread-pool build. 15-min
+success TTL. Also `GET /api/library` (Task 1: `rag.py` `list_corpus()` —
+503 on `rag_chain is None`, executor scan, 500 on scan failure).
+
+**`static/index.html`**: tabs + hash routing; KPI tile renderer; brief
+renderer with degraded states and a parse-error fallback that shows the raw
+LLM text; `generateBrief()` — the UI's only brief POST (double-click guard,
+staged progress text, button flips to "Regenerate (costs 1 LLM call)" only
+when a fresh brief exists); `loadLibrary()`/`renderLibrary()` with the
+>25-URL sprawl collapse rule (spec §9).
+
+**Verification (gates).**
+- Library API (Task 1): 0 credits; totals 6,764 chunks / 96 guideline PDFs
+  (2,975 chunks, matches Phase 5) / 28 protocol pages / 1
+  public-guidance page. Pre-check: `web_sources` = primarycarepages.sg 77
+  URLs (3,785 chunks; legacy chunks have no `source_site` — site derived
+  from URL host) + moh.gov.sg 1 URL / 4 chunks; `/care-protocols/` URLs =
+  28 > 25 → Library renders the collapsed card + "49 other pages"
+  footnote (sitemap/nav/crawl artifacts — ~22 real protocol pages, the
+  depth-2 crawl also pulled preventive + administrative protocols).
+- Brief backend (Task 2): dry runs green (prompt projection leaks no
+  protocol material; parse/guard mocks — valid / malformed / violating /
+  fence-strip / 9→6 clip / coercion). Free endpoints green (stale/none,
+  400 bad point). **Paid record: exactly one verification brief** —
+  `POST /api/brief/generate` → 200, `deepseek/deepseek-v4-flash-0731`,
+  valid JSON, headline + 5 sourced watch items, `provenance_drops: 0`,
+  outlook names the PM2.5 gap (~91 s wall = cold snapshot + LLM).
+  Forced regenerate → **429 + `Retry-After: 59`** (0 credits);
+  no-force after fresh → `cached: true` (0 credits).
+- **Credit deviation (recorded):** the plan budgeted 1 paid call; **2 were
+  consumed.** The boot-time context warm-build completed mid-verification,
+  rotating the 15-min snapshot cache; a no-force POST issued as a "cache
+  probe" (status probes should use the FREE `GET /api/brief`) then saw the
+  rotated snapshot → correct stale detection → paid rebuild. Cache /
+  invalidation behaviour worked as designed; the probe was the deviation.
+  No further paid calls were made in the phase.
+- UI (Tasks 3/4): `node --check` on the extracted page script; headless DOM
+  harnesses against the live server — Brief: 6 tiles, headline, 6 watch
+  cards, outlook, spotlight, tab round trip incl. a manual
+  `refreshContext()` tick from the Chat tab, bogus hash → brief, zero
+  runtime errors; Library (direct reload at `#/library`): 13/13 checks
+  (totals vs API, 96 PDF cards + 1 collapse card, "28 pages — collapsed",
+  "49 other pages" footnote, MOH row with raw URL + derived title,
+  round trip), zero runtime errors. Note: the harness fetch stub always
+  issues GET, so a harness Generate click 405s at the server and can never
+  trigger a paid build; the 0-credit cached path was proven server-side
+  via curl.
+- Standing checks (Task 5): server boot, `/api/status` ready, `/` 200,
+  `GET /api/brief` no-crash, `GET /api/library` totals, `node --check`,
+  `venv/bin/python -m context` exit 0, `git status` clean.
+
+**Cost model (spec §8.3, verbatim):** one brief = at most 2 provider
+round-trips (snapshot context fetches are key-free; the only paid step is
+the single chat-model call), 0 embeddings, 0 retrieval; success cached 15
+min; failure sentinel 90 s; force-regenerate cooldown 60 s.
+
+**Known boundaries:** live PDF upload was NOT exercised this phase
+(embedding spend); brief + snapshot caches are lost on server restart (by
+design); the depth-2 crawl's URL sprawl is visible in the Library
+(collapsed by design).
 
