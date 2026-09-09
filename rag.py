@@ -1,4 +1,5 @@
 import os
+import json
 import hashlib
 import io
 import requests
@@ -17,6 +18,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from context.prompts import format_live_context
+from context.linkage import PROTOCOLS
 
 CHROMA_DIR = "./chroma_db"
 
@@ -493,3 +495,76 @@ def build_chain(vectorstore: Chroma, context_provider=None):
         })
         | RunnableLambda(_run)
     )
+
+
+# --- Phase 6: one-shot clinician brief (spec §8.2) ---------------------------------
+
+_BRIEF_FORBIDDEN = ["protocol", "guideline"] + [p.lower() for p in PROTOCOLS]
+
+
+def _apply_provenance_guard(watch):
+    """Drop watch items that name protocols/guidelines (spec §8.2, D9).
+
+    Substring matching may over-suppress — deliberate: a false positive
+    costs one UI line, a false negative violates the provenance rule.
+    """
+    kept, drops = [], 0
+    for it in watch:
+        blob = (it["finding"] + " " + it["why_it_matters"] + " " + it["action"]).lower()
+        if any(p in blob for p in _BRIEF_FORBIDDEN):
+            drops += 1
+        else:
+            kept.append(it)
+    return kept, drops
+
+
+def _parse_brief(text):
+    t = (text or "").strip()
+    if t.startswith("```"):
+        body = t[3:]
+        if body.lstrip().lower().startswith("json"):
+            body = body.lstrip()[4:]
+        if body.rstrip().endswith("```"):
+            body = body.rstrip()[:-3]
+        t = body.strip()
+    data = json.loads(t)
+    if not isinstance(data, dict):
+        raise ValueError("brief is not a JSON object")
+    items = []
+    watch = data.get("watch")
+    for it in (watch if isinstance(watch, list) else [])[:6]:
+        if not isinstance(it, dict):
+            continue
+        items.append({"finding": str(it.get("finding") or ""),
+                      "why_it_matters": str(it.get("why_it_matters") or ""),
+                      "action": str(it.get("action") or ""),
+                      "source": str(it.get("source") or "derived")})
+    return {"headline": str(data.get("headline") or ""),
+            "watch": items, "outlook": str(data.get("outlook") or "")}
+
+
+def _parse_and_guard(text):
+    """Parse + coerce + provenance-guard an LLM brief response (no I/O)."""
+    try:
+        brief = _parse_brief(text)
+    except ValueError:
+        return {"parse_error": True, "raw": (text or "")[:2000],
+                "headline": "", "watch": [], "outlook": "",
+                "provenance_drops": 0}
+    watch, drops = _apply_provenance_guard(brief["watch"])
+    brief["watch"] = watch
+    brief["provenance_drops"] = drops
+    return brief
+
+
+def generate_brief(system, user):
+    """One-shot brief from the snapshot projection (spec §8.2/§8.3).
+
+    Cost: ONE LLM call — ≤2 provider round-trips (max_retries=1), 0
+    embedding calls, 0 retrieval.
+    """
+    llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL,
+                     temperature=0, timeout=300, max_retries=1)
+    resp = llm.invoke([("system", system), ("human", user)])
+    text = resp if isinstance(resp, str) else str(getattr(resp, "content", resp))
+    return _parse_and_guard(text)

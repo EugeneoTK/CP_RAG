@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,7 +14,8 @@ from pydantic import BaseModel
 load_dotenv()
 
 from rag import (build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR,
-                 ingest_pdf, list_corpus, list_pdfs, MAX_PDF_BYTES)
+                 ingest_pdf, list_corpus, list_pdfs, MAX_PDF_BYTES, generate_brief)
+from context.brief import format_brief_prompt
 from context.config import POSTCODE_DISTRICTS, TEST_CLINIC
 from context.snapshot import build_snapshot
 
@@ -36,6 +38,61 @@ CONTEXT_NAME = os.getenv("CONTEXT_NAME") or TEST_CLINIC["name"]
 CONTEXT_KEY = "%.3f,%.3f" % (CONTEXT_LAT, CONTEXT_LON)
 _context_builds = {}  # "lat,lon" -> in-flight background-build future
 _app_loop = None  # captured in lifespan; get_context_snapshot may run in a worker thread
+
+# --- Phase 6 brief cache (spec §7.2) ----------------------------------------------------
+BRIEF_TTL_S = 900        # success cache, per clinic point
+BRIEF_FAIL_TTL_S = 90    # negative cache: an LLM failure blocks re-dials
+BRIEF_COOLDOWN_S = 60    # min interval between forced regenerations
+_brief_cache = {}        # key -> (monotonic_ts, payload)
+_brief_last_gen = {}     # key -> monotonic_ts of last successful generation
+_brief_builds = {}       # key -> asyncio.Future (in-flight guard, D5)
+
+
+def _brief_lookup(key):
+    hit = _brief_cache.get(key)
+    if not hit:
+        return None
+    ts, payload = hit
+    ttl = BRIEF_FAIL_TTL_S if (payload and "error" in payload) else BRIEF_TTL_S
+    if time.monotonic() - ts > ttl:
+        _brief_cache.pop(key, None)
+        return None
+    return payload
+
+
+def _build_brief(key, point, pname):
+    """Sync build (runs in the thread-pool executor): snapshot + one LLM call."""
+    snap = _context_cache_lookup(key)[0]
+    if snap is None:
+        snap = build_snapshot(point[0], point[1], pname)
+    stats = list_corpus()
+    stats = stats["totals"] if stats else {}
+    system, user = format_brief_prompt(snap, stats)
+    try:
+        result = generate_brief(system, user)
+    except Exception as e:
+        _brief_cache[key] = (time.monotonic(), {"error": str(e)})  # 90-s sentinel
+        raise
+    _brief_cache[key] = (time.monotonic(), {
+        "as_of": datetime.now().isoformat(timespec="seconds"),
+        "snapshot_as_of": snap["meta"]["generated_at"],
+        "brief": result,
+    })
+    _brief_last_gen[key] = time.monotonic()
+    b = {"headline": result.get("headline", ""),
+         "watch": result.get("watch", []),
+         "outlook": result.get("outlook", "")}
+    if result.get("parse_error"):
+        b["parse_error"] = True
+        b["raw"] = result.get("raw", "")
+    return {
+        "cached": False,
+        "as_of": _brief_cache[key][1]["as_of"],
+        "snapshot_as_of": snap["meta"]["generated_at"],
+        "brief": b,
+        "provenance_drops": result.get("provenance_drops", 0),
+        "cache_ttl_s": BRIEF_TTL_S,
+    }
 
 
 def _schedule_context_build(key, clat, clon, cname):
@@ -189,6 +246,108 @@ async def get_library():
     except Exception as e:
         raise HTTPException(500, "Library scan failed: %s" % e)
     return data
+
+
+@app.get("/api/brief")
+async def brief_status(lat: float = None, lon: float = None,
+                       postcode: str = None, name: str = None):
+    """Free brief status/cached read — NEVER triggers a build or LLM call."""
+    clat, clon, cname = _resolve_clinic_point(lat=lat, lon=lon,
+                                              postcode=postcode, name=name)
+    key = "%.3f,%.3f" % (clat, clon)
+    snap, age = _context_cache_lookup(key)
+    if key in _context_builds:
+        snap_state = "building"
+    elif snap:
+        snap_state = "cached"
+    else:
+        snap_state = "none"
+    payload = _brief_lookup(key)
+    brief, last_error, drops, as_of = None, None, 0, None
+    if payload:
+        if payload.get("error"):
+            last_error = payload["error"]
+        else:
+            brief = {"headline": payload["brief"].get("headline", ""),
+                     "watch": payload["brief"].get("watch", []),
+                     "outlook": payload["brief"].get("outlook", "")}
+            if payload["brief"].get("parse_error"):
+                brief["parse_error"] = True
+                brief["raw"] = payload["brief"].get("raw", "")
+            drops = payload["brief"].get("provenance_drops", 0)
+            as_of = payload.get("as_of")
+    fresh = bool(brief) and snap and payload.get("snapshot_as_of") == snap["meta"]["generated_at"]
+    return {
+        "status": "fresh" if fresh else ("stale" if (snap or snap_state == "building") else "none"),
+        "brief": brief,
+        "last_error": last_error,
+        "provenance_drops": drops,
+        "as_of": as_of,
+        "snapshot": {"state": snap_state, "age_s": int(age) if age is not None else None},
+        "clinic": cname,
+        "cache_ttl_s": BRIEF_TTL_S,
+        "force_cooldown_s": BRIEF_COOLDOWN_S,
+    }
+
+
+@app.post("/api/brief/generate")
+async def brief_generate(lat: float = None, lon: float = None,
+                         postcode: str = None, name: str = None,
+                         force: int = 0):
+    """The ONLY path that can call the LLM (spec §7.2 guard order)."""
+    clat, clon, cname = _resolve_clinic_point(lat=lat, lon=lon,
+                                              postcode=postcode, name=name)
+    if rag_chain is None:
+        raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
+    key = "%.3f,%.3f" % (clat, clon)
+    now = time.monotonic()
+    payload = _brief_lookup(key)
+    snap, _age = _context_cache_lookup(key)
+    fresh = bool(payload and not payload.get("error") and snap
+                 and payload.get("snapshot_as_of") == snap["meta"]["generated_at"])
+    if fresh and not force:
+        out = {"headline": payload["brief"].get("headline", ""),
+               "watch": payload["brief"].get("watch", []),
+               "outlook": payload["brief"].get("outlook", "")}
+        if payload["brief"].get("parse_error"):
+            out["parse_error"] = True
+            out["raw"] = payload["brief"].get("raw", "")
+        return {"cached": True, "as_of": payload.get("as_of"),
+                "snapshot_as_of": payload.get("snapshot_as_of"),
+                "brief": out,
+                "provenance_drops": payload["brief"].get("provenance_drops", 0),
+                "cache_ttl_s": BRIEF_TTL_S}
+    if payload and payload.get("error"):           # D7: live failure sentinel
+        raise HTTPException(502,
+                            "Brief generation failed: %s (cached error — "
+                            "retry in up to %ss)" % (payload["error"], BRIEF_FAIL_TTL_S))
+    if key in _brief_builds:                       # D5: await the shared build
+        try:
+            return await _brief_builds[key]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(502, "Brief generation failed: %s" % e)
+    if force:                                      # D6: server-side cooldown
+        last = _brief_last_gen.get(key)
+        if last is not None and now - last < BRIEF_COOLDOWN_S:
+            wait = int(BRIEF_COOLDOWN_S - (now - last))
+            raise HTTPException(429, "Regenerate cooldown — try again in %ss" % wait,
+                                headers={"Retry-After": str(wait)})
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    _brief_builds[key] = fut
+    try:
+        try:
+            result = await loop.run_in_executor(None, _build_brief, key, (clat, clon), cname)
+        except Exception as e:
+            he = HTTPException(502, "Brief generation failed: %s" % e)
+            fut.set_exception(he)
+            raise he
+        fut.set_result(result)
+        return result
+    finally:
+        _brief_builds.pop(key, None)
 
 
 @app.get("/api/status")

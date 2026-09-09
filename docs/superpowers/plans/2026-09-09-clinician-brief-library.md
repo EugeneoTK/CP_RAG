@@ -477,12 +477,9 @@ Imports needed in `app.py` (check what already exists): `from context.brief impo
 async def brief_status(lat: float = None, lon: float = None,
                        postcode: str = None, name: str = None):
     """Free brief status/cached read — NEVER triggers a build or LLM call."""
-    try:
-        point, pname = _resolve_clinic_point(lat=lat, lon=lon,
-                                             postcode=postcode, name=name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    key = "%.3f,%.3f" % point
+    clat, clon, cname = _resolve_clinic_point(lat=lat, lon=lon,
+                                              postcode=postcode, name=name)
+    key = "%.3f,%.3f" % (clat, clon)
     snap, age = _context_cache_lookup(key)
     if key in _context_builds:
         snap_state = "building"
@@ -512,7 +509,7 @@ async def brief_status(lat: float = None, lon: float = None,
         "provenance_drops": drops,
         "as_of": as_of,
         "snapshot": {"state": snap_state, "age_s": int(age) if age is not None else None},
-        "clinic": pname,
+        "clinic": cname,
         "cache_ttl_s": BRIEF_TTL_S,
         "force_cooldown_s": BRIEF_COOLDOWN_S,
     }
@@ -524,14 +521,11 @@ async def brief_generate(lat: float = None, lon: float = None,
                          postcode: str = None, name: str = None,
                          force: int = 0):
     """The ONLY path that can call the LLM (spec §7.2 guard order)."""
-    try:
-        point, pname = _resolve_clinic_point(lat=lat, lon=lon,
-                                             postcode=postcode, name=name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    clat, clon, cname = _resolve_clinic_point(lat=lat, lon=lon,
+                                              postcode=postcode, name=name)
     if rag_chain is None:
         raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
-    key = "%.3f,%.3f" % point
+    key = "%.3f,%.3f" % (clat, clon)
     now = time.monotonic()
     payload = _brief_lookup(key)
     snap, _age = _context_cache_lookup(key)
@@ -571,7 +565,7 @@ async def brief_generate(lat: float = None, lon: float = None,
     _brief_builds[key] = fut
     try:
         try:
-            result = await loop.run_in_executor(None, _build_brief, key, point, pname)
+            result = await loop.run_in_executor(None, _build_brief, key, (clat, clon), cname)
         except Exception as e:
             he = HTTPException(502, "Brief generation failed: %s" % e)
             fut.set_exception(he)
