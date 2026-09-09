@@ -13,7 +13,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from rag import (build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR,
-                 ingest_pdf, list_pdfs, MAX_PDF_BYTES)
+                 ingest_pdf, list_corpus, list_pdfs, MAX_PDF_BYTES)
 from context.config import POSTCODE_DISTRICTS, TEST_CLINIC
 from context.snapshot import build_snapshot
 
@@ -177,6 +177,18 @@ async def get_pdfs():
     """Ingested guideline PDFs (title, source, chunk count)."""
     pdfs = await asyncio.get_running_loop().run_in_executor(None, list_pdfs)
     return {"pdfs": pdfs}
+
+
+@app.get("/api/library")
+async def get_library():
+    """Corpus inventory: guideline PDFs + web sources grouped by site (0 credits)."""
+    if rag_chain is None:
+        raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
+    try:
+        data = await asyncio.get_running_loop().run_in_executor(None, list_corpus)
+    except Exception as e:
+        raise HTTPException(500, "Library scan failed: %s" % e)
+    return data
 
 
 @app.get("/api/status")

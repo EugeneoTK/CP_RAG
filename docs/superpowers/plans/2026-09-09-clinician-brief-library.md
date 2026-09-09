@@ -75,13 +75,18 @@ OpenRouter), Chroma persisted store, vanilla JS/CSS in `static/index.html`.
 
 **Interfaces:**
 - Consumes: existing `vectorstore` global, `list_pdfs()` scan pattern.
-- Produces: `list_corpus() -> dict | None` (shape in the File structure table).
+- Produces: `list_corpus() -> dict` (shape in the File structure table).
 
 - [ ] **Step 1: Read the existing scan to mirror it exactly**
 
-Read `list_pdfs()` in `rag.py` (the `vectorstore._collection.get(include=
-["metadatas"])` loop that groups by `doc_title`/`doc_hash`) and the `GET
-/api/pdfs` handler in `app.py` (executor + 503 when `vectorstore is None`).
+Read `list_pdfs()` in `rag.py` (the `load_vectorstore()` +
+`vectorstore.get(include=["metadatas"])` loop that groups by `doc_hash`) and
+the `GET /api/pdfs` handler in `app.py` (`asyncio.get_running_loop().
+run_in_executor(None, list_pdfs)`). Note: `app.py` has **no module-level
+`vectorstore` global** — it is a local in `lifespan()`/handlers; the
+readiness signal is the module global `rag_chain` (set only when
+`chroma_db/` exists at boot), so all "not ready" 503 checks use
+`if rag_chain is None` (the same signal `/api/status.ready` uses).
 Confirm the chunk metadata keys in use: `source`, `source_site`,
 `doc_title`, `doc_hash`.
 
@@ -89,54 +94,66 @@ Confirm the chunk metadata keys in use: `source`, `source_site`,
 
 ```python
 def _derive_title(url):
-    """Display title from a URL: last non-empty path segment, cosmetic only.
+    """Display title from a URL (cosmetic only — the raw URL is always shown
+    beside it in the Library; web-crawled chunks store no page title).
 
-    Web-crawled chunks store no page title (corpus audit), so the Library
-    shows this alongside the raw URL, never instead of it.
+    Spec: last URL path segment, %20/- → spaces, title-cased; a bare web file
+    name (e.g. diabetes.html) drops the extension.
     """
-    path = url.rstrip("/").split("?", 1)[0]
+    path = url.split("?", 1)[0].split("#", 1)[0].rstrip("/")
     segs = [s for s in path.split("/") if s]
-    if not segs:
-        return "index"
-    seg = segs[-1]
-    if "." in seg and segs[-1:] == [segs[-1]] and not segs[-2:-1]:
-        seg = "index"
-    if len(segs) >= 2 and "." in seg:
-        seg = segs[-2]
-    return seg.replace("%20", " ").replace("-", " ").title()
+    seg = segs[-1] if segs else "index"
+    base, dot, ext = seg.rpartition(".")
+    if base and dot and ext.lower() in ("html", "htm", "php", "asp", "aspx", "jsp"):
+        seg = base
+    return seg.replace("%20", " ").replace("-", " ").title() or "index"
+
+
+def _site_of(url):
+    """Site label for legacy chunks that predate the source_site field
+    (the original primarycarepages.sg crawl stored no site metadata)."""
+    if not url.startswith("http"):
+        return ""
+    host = url.split("/", 3)[2]
+    return host[4:] if host.startswith("www.") else host
 
 
 def list_corpus():
     """Full corpus inventory (read-only metadata scan, 0 API credits).
 
-    Returns None if no vectorstore. Web sources are grouped by
-    source_site; per-URL chunk counts; derived titles only (raw URL always
-    shown beside them by the UI).
+    PDFs grouped by doc_hash (mirrors list_pdfs()); web sources grouped by
+    source_site — legacy no-site chunks fall back to the URL host
+    (`_site_of`). `protocol_pages` counts unique URLs under the
+    `/care-protocols/` path (the depth-2 crawl also captured site nav pages
+    and a few link artifacts; they stay in `web_sources` for the raw
+    inventory). Derived titles are cosmetic only — the raw URL is always
+    shown beside them by the UI. The endpoint 503s on `rag_chain is None`
+    before calling this (see Step 1 note).
     """
-    if vectorstore is None:
-        return None
-    rows = vectorstore._collection.get(include=["metadatas"])
+    vs = load_vectorstore()
+    rows = vs.get(include=["metadatas"]).get("metadatas") or []
     pdfs, web = {}, {}
-    for meta in rows["metadatas"]:
-        src = meta.get("source") or ""
-        site = meta.get("source_site") or ""
-        if meta.get("doc_title") is not None:
-            entry = pdfs.setdefault(meta["doc_title"], {
-                "title": meta["doc_title"], "source": src, "chunks": 0,
-                "doc_hash": meta.get("doc_hash") or ""})
+    for m in rows:
+        m = m or {}
+        src = m.get("source") or ""
+        site = m.get("source_site") or _site_of(src)
+        if m.get("doc_hash"):
+            entry = pdfs.setdefault(m["doc_hash"], {
+                "title": m.get("doc_title") or "?", "source": src,
+                "chunks": 0, "doc_hash": m["doc_hash"]})
             entry["chunks"] += 1
-        elif site:
+        elif site and src:
             entry = web.setdefault(site, {}).setdefault(src, {
                 "url": src, "chunks": 0, "derived_title": _derive_title(src)})
             entry["chunks"] += 1
-    protocol_pages = sum(1 for e in web.get("primarycarepages.sg", {}).values())
-    guidance_pages = sum(1 for e in web.get("moh.gov.sg", {}).values())
+    protocol_pages = sum(1 for urls in web.values()
+                         for e in urls.values() if "/care-protocols/" in e["url"])
     return {
         "totals": {
-            "chunks": len(rows["metadatas"]),
+            "chunks": len(rows),
             "guideline_pdfs": len(pdfs),
             "protocol_pages": protocol_pages,
-            "public_guidance_pages": guidance_pages,
+            "public_guidance_pages": sum(1 for _ in web.get("moh.gov.sg", {})),
         },
         "pdfs": sorted(pdfs.values(), key=lambda p: p["title"].lower()),
         "web_sources": {site: sorted(urls.values(), key=lambda e: e["url"])
@@ -148,19 +165,19 @@ def list_corpus():
 
 ```python
 @app.get("/api/library")
-async def library():
+async def get_library():
     """Corpus inventory: guideline PDFs + web sources grouped by site (0 credits)."""
+    if rag_chain is None:
+        raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
     try:
-        data = await loop.run_in_executor(None, list_corpus)
+        data = await asyncio.get_running_loop().run_in_executor(None, list_corpus)
     except Exception as e:
         raise HTTPException(500, "Library scan failed: %s" % e)
-    if data is None:
-        raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
     return data
 ```
 
-(Use whichever executor idiom `app.py` already uses — e.g. the module-level
-`loop` or `asyncio.get_running_loop().run_in_executor` — match `/api/pdfs`.)
+(Executor idiom matches `/api/pdfs`; `rag_chain is None` is the 503 signal —
+there is no module-level `vectorstore` in `app.py`.)
 
 - [ ] **Step 4: Boot + 0-credit pre-check (the review's URL-shape gate)**
 
@@ -170,10 +187,16 @@ curl -s localhost:5001/api/status
 curl -s localhost:5001/api/library | venv/bin/python -c "import json,sys; d=json.load(sys.stdin); print(d['totals']); print(len(d['web_sources'].get('primarycarepages.sg', [])), 'protocol URLs'); [print(e['url'], e['chunks']) for e in d['web_sources'].get('primarycarepages.sg', [])[:30]]"
 ```
 
-Expected: `totals.guideline_pdfs == 96`; a list of protocol-page URLs.
-**Record in the SDD ledger** the actual protocol URL count and any odd shapes
-(anchors, subpages, nav pages). This observation fixes Task 4's collapse rule
-(spec §9: > 25 protocol URLs → site-level totals view).
+Expected: `totals.guideline_pdfs == 96`; PDF chunks 2,975 (ledger);
+`protocol_pages` = 28 (observed — 22 real protocol pages + crawl artifacts:
+`https&`, `mailto&`, `_vti_bin/spsdisco.aspx`, a trailing-slash duplicate,
+a zero-width-char link; the original Phase-0 set was 17 — the depth-2 crawl
+pulled preventive/administrative protocols too). **Record in the SDD
+ledger** the actual counts (77 unique primarycarepages.sg URLs / 3,785
+chunks legacy no-`source_site`; 49 non-protocol site pages; 1 MOH page /
+4 chunks). This observation fixes Task 4's rendering: 28 > 25 → the
+protocol section uses the collapsed site-level card (spec §9), with an
+"other site pages" count line.
 
 - [ ] **Step 5: Standing checks + commit**
 
@@ -186,8 +209,9 @@ git commit -m "feat: GET /api/library corpus inventory (PDFs + web sources by si
 ```
 
 **Gate:** all curls 0 credits; server boots; `list_corpus()` totals match the
-ledger's known corpus (96 PDFs, 17 protocol pages, 1 MOH page); ledger records
-the URL count.
+ledger's known corpus (96 PDFs / 2,975 chunks; protocol pages counted by
+`/care-protocols/` URL prefix — 28 observed; 1 MOH page); ledger records the
+URL count and the no-`source_site` legacy finding.
 
 ### Task 2: brief backend — `context/brief.py`, `rag.generate_brief()`, the two brief endpoints
 
@@ -505,7 +529,7 @@ async def brief_generate(lat: float = None, lon: float = None,
                                              postcode=postcode, name=name)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if vectorstore is None:
+    if rag_chain is None:
         raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
     key = "%.3f,%.3f" % point
     now = time.monotonic()

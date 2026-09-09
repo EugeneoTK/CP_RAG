@@ -317,6 +317,73 @@ def list_pdfs():
              "chunks": v["chunks"]} for k, v in agg.items()]
 
 
+def _derive_title(url):
+    """Display title from a URL (cosmetic only — the raw URL is always shown
+    beside it in the Library; web-crawled chunks store no page title).
+
+    Last URL path segment, %20/- → spaces, title-cased; a bare web file
+    name (e.g. diabetes.html) drops the extension.
+    """
+    path = url.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    segs = [s for s in path.split("/") if s]
+    seg = segs[-1] if segs else "index"
+    base, dot, ext = seg.rpartition(".")
+    if base and dot and ext.lower() in ("html", "htm", "php", "asp", "aspx", "jsp"):
+        seg = base
+    return seg.replace("%20", " ").replace("-", " ").title() or "index"
+
+
+def _site_of(url):
+    """Site label for legacy chunks that predate the source_site field
+    (the original primarycarepages.sg crawl stored no site metadata)."""
+    if not url.startswith("http"):
+        return ""
+    host = url.split("/", 3)[2]
+    return host[4:] if host.startswith("www.") else host
+
+
+def list_corpus():
+    """Full corpus inventory (read-only metadata scan, 0 API credits).
+
+    PDFs grouped by doc_hash (mirrors list_pdfs()); web sources grouped by
+    source_site — legacy no-site chunks fall back to the URL host (_site_of).
+    `protocol_pages` counts unique URLs under the /care-protocols/ path (the
+    depth-2 crawl also captured site nav pages and a few link artifacts;
+    they stay in web_sources for the raw inventory). Derived titles are
+    cosmetic only — the raw URL is always shown beside them by the UI. The
+    endpoint 503s on `rag_chain is None` before calling this.
+    """
+    vs = load_vectorstore()
+    rows = vs.get(include=["metadatas"]).get("metadatas") or []
+    pdfs, web = {}, {}
+    for m in rows:
+        m = m or {}
+        src = m.get("source") or ""
+        site = m.get("source_site") or _site_of(src)
+        if m.get("doc_hash"):
+            entry = pdfs.setdefault(m["doc_hash"], {
+                "title": m.get("doc_title") or "?", "source": src,
+                "chunks": 0, "doc_hash": m["doc_hash"]})
+            entry["chunks"] += 1
+        elif site and src:
+            entry = web.setdefault(site, {}).setdefault(src, {
+                "url": src, "chunks": 0, "derived_title": _derive_title(src)})
+            entry["chunks"] += 1
+    protocol_pages = sum(1 for urls in web.values()
+                         for e in urls.values() if "/care-protocols/" in e["url"])
+    return {
+        "totals": {
+            "chunks": len(rows),
+            "guideline_pdfs": len(pdfs),
+            "protocol_pages": protocol_pages,
+            "public_guidance_pages": sum(1 for _ in web.get("moh.gov.sg", {})),
+        },
+        "pdfs": sorted(pdfs.values(), key=lambda p: p["title"].lower()),
+        "web_sources": {site: sorted(urls.values(), key=lambda e: e["url"])
+                        for site, urls in sorted(web.items())},
+    }
+
+
 def _active_protocol_names(context_provider) -> list:
     """Mechanism B: protocol names engaged by the active live links."""
     if not context_provider:
