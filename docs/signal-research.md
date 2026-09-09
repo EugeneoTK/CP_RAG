@@ -281,6 +281,17 @@ PC 738579 — real point from the Vaccination_Polyclinics GEOJSON `d_b22489c7dc4
 First run emitted a complete snapshot, `data_gaps: []`, 4 active links: PM2.5 29 (S),
 WBGT 31.9 °C Moderate, thundery showers Wed–Fri, and a **dengue cluster 2.7 km from the clinic**.
 
+**2026-09-09 (test clinic swap, historical note):** the test clinic is now
+**Lakeside Family Medicine Clinic**, 518A Jurong West Street 52, PC 641518
+(103.7188, 1.3454 — real GP-clinic point, OSM node 8083778017; same-day swaps to
+Pioneer Polyclinic and DA Clinic @ Taman Jurong were superseded — first because a
+*polyclinic* is not the app's GP persona, then by user choice between the two GP
+finalists). It generates the richest live brief: west-region PM2.5 56 (island peak
+75, central — haze day) **and** a **60-case dengue cluster** (Ho Ching Rd,
+upd 2026-09-03) **1.1 km** away + a 2-case cluster 0.3 km away → 5 active protocol
+links, `data_gaps: []` (verified 0 LLM credits). The Woodlands run above is the
+2026-09-08 historical record.
+
 Implementation decisions / corrections:
 - **GEOJSON path** is `GET api-open.../v1/public/api/datasets/{id}/poll-download` (v1, key-free)
   → signed S3 URL. The v2 production subscription endpoint is 404. Cache: system temp dir,

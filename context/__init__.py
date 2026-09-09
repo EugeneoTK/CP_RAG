@@ -8,8 +8,8 @@ Stdlib only (urllib/json/math). Python 3.9 compatible. No API keys required;
 DGS_API_KEY in .env is used if present (optional, higher rate limits only).
 
 Run:
-    venv/bin/python -m context --lat 1.430893 --lon 103.775213 --name "Woodlands Polycline (test)"
-    venv/bin/python -m context --postcode 738579
+    venv/bin/python -m context --lat 1.345402 --lon 103.718838 --name "Lakeside Family Medicine Clinic (test)"
+    venv/bin/python -m context --postcode 641518
     venv/bin/python -m context ... --json
 """
 

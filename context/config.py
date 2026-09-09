@@ -82,12 +82,16 @@ def _load_ura_key():
 
 URA_ACCESS_KEY = _load_ura_key()
 
-# --- test clinic: real polycline point from d_b22489c7 (verified 2026-09-08) -------
+# --- test clinic: real GP clinic point (OSM node 8083778017, verified 2026-09-09) ---
+# A private GP clinic, not a polycline — the app persona is a GP chronic-care practice.
+# Chosen 2026-09-09 for the richest live brief: west-region PM2.5 56 (island peak 75,
+# central — haze day) + a 60-case dengue cluster (Ho Ching Rd, upd 2026-09-03) 1.1 km
+# away + a 2-case cluster 0.3 km away (5 active protocol links, data_gaps []).
 TEST_CLINIC = {
-    "name": "Woodlands Polycline (test clinic)",
-    "lat": 1.4308932241216819,
-    "lon": 103.77521291746736,
-    "postcode": "738579",
+    "name": "Lakeside Family Medicine Clinic (test clinic)",
+    "lat": 1.3454017,
+    "lon": 103.7188383,
+    "postcode": "641518",
 }
 
 # Approximate district centroids by first postcode digit (coarse; use --lat/--lon
