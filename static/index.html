@@ -257,6 +257,39 @@
     .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
     .empty-state p { font-size: 0.9rem; }
 
+    .chat-helper {
+      margin-top: 8px;
+      width: 100%;
+      max-width: 480px;
+      text-align: left;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 0.75rem;
+      line-height: 1.5;
+      color: #64748b;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .chat-helper-title {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #334155;
+      margin-bottom: 6px;
+    }
+    .chat-helper ul { list-style: none; }
+    .chat-helper li { position: relative; padding: 2px 0 2px 14px; }
+    .chat-helper li::before { content: "•"; position: absolute; left: 2px; color: #1a56db; }
+    .chat-helper li b { color: #334155; font-weight: 600; }
+    .chat-helper-boundary {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 0.72rem;
+    }
+
     /* --- F2 context strip (Phase 1) ------------------------------------------- */
     #ctx-strip { width: 100%; max-width: 800px; padding: 10px 0 0; }
 
@@ -536,6 +569,22 @@
             d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 01-4-.833L3 20l1.167-4A8.002 8.002 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
         </svg>
         <p>Ask a question about Singapore's chronic care protocols.</p>
+        <div class="chat-helper">
+          <div class="chat-helper-title">Sources</div>
+          <ul>
+            <li><b>Care protocols</b> — 17 chronic-care protocols (primarycarepages.sg)</li>
+            <li><b>Clinical guidelines</b> — ACE guidelines + uploaded PDFs</li>
+            <li><b>Public guidance</b> — MOH, e.g. haze advice</li>
+            <li><b>Community</b> — NTUC Active Ageing programme calendars (non-clinical)</li>
+            <li><b>Local context</b> — live air quality, weather &amp; dengue for your clinic location</li>
+          </ul>
+          <p class="chat-helper-boundary">
+            Answers come only from these sources — it will say it doesn't know when the
+            corpus doesn't cover a question. Guidelines and public guidance are cited as
+            themselves, never as protocol content. Decision support, not a substitute for
+            clinical judgement.
+          </p>
+        </div>
       </div>
     </div>
 
