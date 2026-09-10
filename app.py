@@ -425,6 +425,13 @@ async def get_context(lat: float = None, lon: float = None,
         "X-Snapshot-Cache": "miss", "X-Snapshot-Age": "0"})
 
 
+# Catch-all static mount: index.html references assets root-relative
+# (e.g. /sgds-utility.css), which only resolves when the page is served
+# from a plain static server rooted at static/. Serve the same directory
+# at the site root so the page renders identically from this app.
+# Must be registered AFTER every route above — it matches anything left.
+app.mount("/", StaticFiles(directory="static", html=False), name="static-root")
+
 if __name__ == "__main__":
     # `python app.py` used to import and exit silently — always give it a
     # server to run (was HANDOFF outstanding #6). PORT env overrides 5001.
