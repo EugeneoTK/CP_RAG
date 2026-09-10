@@ -79,8 +79,12 @@ def _area_for_address(address):
 def _enrich_ura(cc, lat, lon):
     """Phase 8: add district / approx_km / distance_band to each listed
     decision (distance to the AREA centroid — rough, documented) and set
-    cc["near_clinic_count"]. Mutates and returns cc."""
+    cc["near_clinic_count"]. Also cc["nearest_km_by_category"]: min approx_km
+    per category over MAPPED rows only — a category whose rows are all
+    unmapped gets no entry (unmeasurable, never invented). Mutates and
+    returns cc."""
     near = 0
+    nearest = {}
     for a in cc.get("healthcare_decisions_90d") or []:
         hit = _area_for_address(a.get("address"))
         if not hit:
@@ -93,7 +97,11 @@ def _enrich_ura(cc, lat, lon):
                               else "mid" if km <= 25 else "far")
         if km <= config.URA_NEAR_KM:
             near += 1
+        cat = a.get("category") or "Other"
+        if km < nearest.get(cat, float("inf")):
+            nearest[cat] = km
     cc["near_clinic_count"] = near
+    cc["nearest_km_by_category"] = nearest
     return cc
 
 

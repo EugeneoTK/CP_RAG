@@ -1215,13 +1215,19 @@
     if (pGap) tiles += tileHtml('New health facilities (3 mo)', 'warn', 'unavailable', escapeHtml(pGap));
     else if (cc.healthcare_decisions_90d_count != null) {
       const k = cc.category_counts || {};
+      // nearest_km_by_category: min ~km per category over street-mapped rows
+      // only (centroid distance, rough); a category with no mapped rows
+      // renders its count with no distance — never invented.
+      const nn = cc.nearest_km_by_category || {};
+      const nkm = cats => { const v = cats.map(c => nn[c]).filter(x => x != null); return v.length ? Math.min.apply(null, v) : null; };
+      const d = v => v != null ? ' (nearest ~' + v + ' km)' : '';
       const bits = [];
-      if (k['Senior care']) bits.push(k['Senior care'] + ' senior care');
-      if (k['Nursing home']) bits.push(k['Nursing home'] + ' nursing home');
-      if (k['Child care']) bits.push(k['Child care'] + ' child care');
+      if (k['Senior care']) bits.push(k['Senior care'] + ' senior care' + d(nn['Senior care']));
+      if (k['Nursing home']) bits.push(k['Nursing home'] + ' nursing home' + d(nn['Nursing home']));
+      if (k['Child care']) bits.push(k['Child care'] + ' child care' + d(nn['Child care']));
       const cm = (k['Clinic'] || 0) + (k['Medical'] || 0) + (k['Other'] || 0);
-      if (cm) bits.push(cm + ' clinic/medical');
-      if (k['Polyclinic']) bits.push(k['Polyclinic'] + ' polyclinic');
+      if (cm) bits.push(cm + ' clinic/medical' + d(nkm(['Clinic', 'Medical', 'Other'])));
+      if (k['Polyclinic']) bits.push(k['Polyclinic'] + ' polyclinic' + d(nn['Polyclinic']));
       const near = cc.near_clinic_count ? cc.near_clinic_count + ' near (~2 km) · ' : '';
       tiles += tileHtml('New health facilities (3 mo)', '', cc.healthcare_decisions_90d_count + ' approvals',
         near + (bits.join(' · ') || 'permission ≠ opened facility'));
