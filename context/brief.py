@@ -78,9 +78,11 @@ def _project(snapshot, corpus_stats):
         "planning": {"window": cc.get("window"),
                      "healthcare_decisions_90d_count":
                          cc.get("healthcare_decisions_90d_count"),
+                     "category_counts": cc.get("category_counts"),
+                     "near_clinic_count": cc.get("near_clinic_count"),
                      "recent_decisions":
                          _clip_dicts(cc.get("healthcare_decisions_90d"), 3)},
-        "polyclinics": _clip_dicts(ns.get("pyclinics"), 3),
+        "polyclinics": _clip_dicts(ns.get("polyclinics"), 3),
         "data_gaps": snapshot.get("data_gaps") or [],
         "corpus": corpus_stats or {},
     }

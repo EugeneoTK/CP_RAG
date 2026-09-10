@@ -2,6 +2,9 @@ import os
 import json
 import hashlib
 import io
+import re
+import threading
+import datetime
 import requests
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
@@ -43,12 +46,95 @@ def pdf_text(data: bytes) -> str:
             blocks.append("[page %d]\n%s" % (i, t))
     return "\n\n".join(blocks)
 
-# LLM provider — OpenAI-compatible. Defaults to api.openai.com; point
-# OPENAI_BASE_URL at a gateway (e.g. https://openrouter.ai/api/v1) to use one.
-# Model ids must match the provider's namespace (OpenRouter: "openai/gpt-4o").
+# LLM providers — OpenAI-compatible. The CHAT path (RAG answers + brief) is
+# switchable at runtime between "openrouter" (the .env gateway config) and a
+# local vLLM server (LOCAL_* env); the UI header toggle posts to
+# POST /api/provider. EMBEDDINGS are never switched: the stored ./chroma_db
+# was embedded with EMBED_MODEL via this same OpenAI-compatible config, so
+# retrieval must keep using it (a different embedding model invalidates the
+# index). Model ids must match the provider's namespace
+# (OpenRouter: "openai/gpt-4o").
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-ada-002")
+
+PROVIDERS = {
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": OPENAI_BASE_URL,
+        "api_key": os.getenv("OPENAI_API_KEY", ""),
+        "model": os.getenv("CHAT_MODEL", "gpt-4o"),
+    },
+    "local": {
+        "label": "Local LLM",
+        "base_url": os.getenv("LOCAL_BASE_URL", "http://10.8.0.9:9001/v1"),
+        "api_key": os.getenv("LOCAL_API_KEY", "sk-no-key-required"),
+        "model": os.getenv("LOCAL_CHAT_MODEL", "comp9:gpu0-vllm"),
+    },
+}
+_default_provider = os.getenv("CHAT_PROVIDER", "openrouter")
+if _default_provider not in PROVIDERS:
+    _default_provider = "openrouter"
+
+_provider_lock = threading.Lock()
+_current_provider = _default_provider
+
+
+def get_provider():
+    with _provider_lock:
+        return _current_provider
+
+
+def set_provider(name):
+    """Switch the chat-model provider at runtime (UI toggle). Raises
+    ValueError on an unknown id. Config-only — no connectivity probe, and
+    embeddings are unaffected (see the block above)."""
+    global _current_provider
+    if name not in PROVIDERS:
+        raise ValueError("unknown provider %r (choose from %s)"
+                         % (name, ", ".join(sorted(PROVIDERS))))
+    with _provider_lock:
+        _current_provider = name
+    return name
+
+
+def provider_info():
+    """Key-free view of the provider registry for the UI (API keys are
+    never exposed)."""
+    return {"current": get_provider(),
+            "providers": [{"id": name, "label": cfg["label"],
+                           "model": cfg["model"], "base_url": cfg["base_url"]}
+                          for name, cfg in PROVIDERS.items()]}
+
+
+def make_chat_llm(provider=None, **extra):
+    """Fresh ChatOpenAI for a provider (default: the UI-selected one).
+    Built per call on purpose — the provider may flip between calls without
+    a restart, and constructing a client is trivial next to the LLM
+    round-trip it serves (0 credits).
+    Bounded provider calls: without explicit caps a hung request would sit
+    for ~30 min (openai client defaults: 600 s/attempt x 3 tries) before
+    surfacing as an error.
+    Local provider: vLLM-served Qwen3 defaults to *thinking mode* — the
+    model spends completion tokens on internal reasoning, and against a
+    max_tokens cap it can return EMPTY content (observed 2026-09-10: brief
+    generation consumed 4000/4000 tokens, finish_reason=length, content "").
+    Thinking is disabled for the local provider by default (set
+    LOCAL_DISABLE_THINKING=0 to re-enable). Sent via `extra_body` (the
+    langchain-openai field for non-OpenAI request params — `model_kwargs`
+    are merged into create() kwargs and would raise TypeError); the param
+    itself is vLLM-specific, hence scoped to the local provider only.
+    """
+    pname = provider or get_provider()
+    cfg = PROVIDERS[pname]
+    kw = dict(model_name=cfg["model"], openai_api_base=cfg["base_url"],
+              openai_api_key=cfg["api_key"], temperature=0, timeout=300,
+              max_retries=1)
+    if (pname == "local"
+            and os.getenv("LOCAL_DISABLE_THINKING", "1").lower()
+            not in ("0", "false", "no")):
+        kw["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+    kw.update(extra)
+    return ChatOpenAI(**kw)
 
 # --- corpus sources (Phase 2: multi-source) ---------------------------------------
 # (name, url, max_depth). `name` becomes the chunk metadata `source_site`.
@@ -61,10 +147,27 @@ SOURCES = [
      "https://www.primarycarepages.sg/healthier-sg/care-protocols/chronic-care-protocols/", 2),
     ("moh.gov.sg", "https://www.moh.gov.sg/others/haze/", 0),
 ]
-# Chunk sites rendered in the "Protocol content" prompt section: everything NOT
-# listed here (and chunks with no source_site, i.e. the pre-Phase 2 corpus) is
-# public guidance — never presented as protocol content.
+# Provenance routing by site label (chunk metadata `source_site`) —
+# _prepare_sections() decides the prompt section from these sets:
+#   PUBLIC_GUIDANCE_SITES -> "Public health guidance"
+#   GUIDELINE_SITES       -> "Clinical guidelines" (defined below)
+#   COMMUNITY_SITES       -> "Community resources" (Phase 7)
+#   everything else       -> "Protocol content"
 PUBLIC_GUIDANCE_SITES = {"moh.gov.sg"}
+
+# Phase 7: NTUC Health Active Ageing programme calendars — NON-clinical
+# community resources (exercise/social/digital-skills activities at island-wide
+# centres). Routed to the "Community resources" prompt section; never presented
+# as protocol content or clinical guidelines. Ingested via the monthly
+# user-triggered refresh (ingest_community_refresh), deliberately NOT a
+# SOURCES crawl.
+COMMUNITY_SITES = {"ntuchealth.sg"}
+
+# Landing page listing one calendar PDF per centre on assets.ntuchealth.sg/ae/
+# (the filename carries the month, e.g. "Redhill-Sep-2026.pdf" — the set
+# rotates monthly; a refresh replaces the previous month's chunks).
+NTUC_CALENDAR_URL = ("https://ntuchealth.sg/active-ageing/services/"
+                     "active-ageing-programme-calendars")
 
 # gov.sg sits behind CloudFront and 403s the default python-requests UA.
 _BROWSER_UA = (
@@ -177,11 +280,12 @@ def _embeddings() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(model=EMBED_MODEL, openai_api_base=OPENAI_BASE_URL)
 
 
-PROMPT_TEMPLATE = """Answer the question using only the four sections below. If they do not cover the question, say you don't know.
+PROMPT_TEMPLATE = """Answer the question using only the five sections below. If they do not cover the question, say you don't know.
 
 - "Protocol content": excerpts from the clinic's chronic-care protocols. This is the only material you may cite as protocol content. Where basis notes are given they state exactly what the protocol text does and does not support — do not over-claim beyond them.
 - "Clinical guidelines": Singapore ACE clinical guidelines (ACGs) and other uploaded clinical guidance PDFs. Cite them as guideline content — never as protocol content.
 - "Public health guidance": government public health guidance (e.g. MOH). You may cite it, but as public guidance — never as protocol content.
+- "Community resources": NTUC Health Active Ageing Centre programme calendars — community exercise, social and digital-skills activities at island-wide centres. These are NON-CLINICAL resources for older patients' community engagement. Use them only when the question is about community programmes, activities, social support or referrals for healthy older patients. Never cite them as protocol content or clinical guidelines; a calendar programme is a community activity, not a treatment or evidence-based intervention.
 - "Local context": live population-level signals (air quality, weather, dengue) for the clinic point. These are observations about the area right now, NOT protocol content: use them to frame the answer (environmental triggers, sick-day rules, counselling), but never attribute them to the protocols.
 
 Formatting: the answer renders as PLAIN TEXT in a chat window — it has NO markdown support. Never use **bold**, *italic*, # headings, or backticks; write plain words only. Simple dash bullets and a blank line between sections are fine.
@@ -194,6 +298,9 @@ Formatting: the answer renders as PLAIN TEXT in a chat window — it has NO mark
 
 == Public health guidance ==
 {public_guidance}
+
+== Community resources ==
+{community_resources}
 
 == Local context — clinic: {clinic}, as of {as_of} ==
 {local_context}
@@ -324,13 +431,160 @@ def ingest_pdf(data: bytes, title: str, source: str = "",
     return len(splits), False, doc_hash
 
 
+# --- Phase 7: NTUC Active Ageing community calendars (monthly refresh) ---------
+# The landing page (NTUC_CALENDAR_URL) renders one calendar PDF per centre as
+# <a href="https://assets.ntuchealth.sg/ae/<Centre>-<Mon>-<Year>.pdf">Centre</a>.
+# The filename carries the month, so the whole set rotates monthly. A refresh
+# is a REPLACE (embed current month, delete previous month) — appending would
+# let stale months mislead the model. Only COMMUNITY_SITES chunks are ever
+# touched; the rest of the corpus is never re-embedded.
+
+_COMMUNITY_FNAME_RE = re.compile(r"-([A-Z][a-z]{2})-(\d{4})\.pdf$")
+_COMMUNITY_MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5,
+                     "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10,
+                     "Nov": 11, "Dec": 12}
+
+
+def _calendar_month_from_name(filename):
+    """'Redhill-Sep-2026.pdf' -> '2026-09' ('' when unparseable)."""
+    m = _COMMUNITY_FNAME_RE.search(filename or "")
+    if not m:
+        return ""
+    month = _COMMUNITY_MONTHS.get(m.group(1))
+    if not month:
+        return ""
+    return "%s-%02d" % (m.group(2), month)
+
+
+def fetch_community_calendars():
+    """Discover the current per-centre calendar PDFs on the NTUC landing page.
+
+    Returns ((centre_name, pdf_url), ...), error — error is None on success.
+    The anchor text of each PDF link is the centre name.
+    """
+    try:
+        html = _fetch(NTUC_CALENDAR_URL)
+    except Exception as e:
+        return [], "landing page fetch failed: %s" % e
+    soup = BeautifulSoup(html, "html.parser")
+    pairs, seen = [], set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if ("assets.ntuchealth.sg/ae/" not in href
+                or not href.lower().endswith(".pdf")):
+            continue
+        key = _norm_url(href)
+        if key in seen:
+            continue
+        seen.add(key)
+        centre = a.get_text(" ", strip=True) or href.rsplit("/", 1)[-1]
+        pairs.append((centre, href))
+    if not pairs:
+        return [], ("no calendar PDFs found on the landing page "
+                    "(site structure changed?)")
+    return pairs, None
+
+
+def ingest_community_refresh(max_new_chunks: int = 600):
+    """User-triggered monthly refresh of the NTUC community calendars.
+
+    Replace semantics: the previous month's chunks are deleted and the current
+    per-centre PDFs embedded. ADD-THEN-DELETE ordering (not delete-then-add):
+    if downloading/parsing/embedding fails, the previous month stays intact —
+    a broken month can never wipe the good data. Idempotent: when every PDF's
+    doc_hash is already in the store, nothing is written (0 embed calls).
+
+    Returns a summary dict. Raises RuntimeError on a structural failure
+    (no PDFs, <100 chunks, >max_new_chunks) BEFORE touching the store.
+    """
+    global _meta_scan_cache
+    vectorstore = load_vectorstore()
+    pairs, err = fetch_community_calendars()
+    if err:
+        raise RuntimeError(err)
+    have_hashes, _have_urls = _store_pdf_index(vectorstore)
+    refreshed_at = datetime.datetime.now(datetime.timezone.utc).isoformat(
+        timespec="seconds")
+
+    docs, failed, present = [], [], 0
+    for centre, url in pairs:
+        fname = url.rsplit("/", 1)[-1].split("?", 1)[0]
+        month = _calendar_month_from_name(fname)
+        try:
+            resp = requests.get(url, headers={"User-Agent": _BROWSER_UA},
+                                timeout=120)
+            resp.raise_for_status()
+            data = resp.content
+            text = pdf_text(data)
+        except Exception as e:
+            failed.append("%s: %s" % (centre, e))
+            continue
+        if not text.strip():
+            failed.append("%s: no extractable text" % centre)
+            continue
+        doc_hash = hashlib.sha256(data).hexdigest()[:16]
+        if doc_hash in have_hashes:
+            present += 1
+        docs.append(Document(
+            page_content=text,
+            metadata={"source": url, "source_site": "ntuchealth.sg",
+                      "doc_title": "NTUC Active Ageing — %s — %s programme calendar"
+                                   % (centre, month or "current"),
+                      "doc_hash": doc_hash,
+                      "calendar_month": month,
+                      "community_refreshed_at": refreshed_at}))
+    months = sorted({m for m in (_calendar_month_from_name(u.rsplit("/", 1)[-1])
+                                 for _c, u in pairs) if m})
+
+    if not docs:
+        raise RuntimeError("no community calendars parsed (failed: %s)"
+                           % ("; ".join(failed[:5]) or "unknown"))
+    splits = _split(docs)
+    if len(splits) < 100:
+        raise RuntimeError(
+            "only %d community chunks (expected ~450) — landing page structure "
+            "changed; store left untouched" % len(splits))
+    if len(splits) > max_new_chunks:
+        raise RuntimeError("community refresh would embed %d chunks (> %d cap); "
+                           "store left untouched" % (len(splits), max_new_chunks))
+
+    if present == len(docs):
+        # Every PDF byte-identical to what is already stored — up to date,
+        # nothing written, 0 embed calls.
+        return {"status": "up-to-date", "centres": len(pairs), "ok": len(docs),
+                "failed": failed, "chunks_added": 0, "chunks_removed": 0,
+                "calendar_months": months}
+
+    old_rows = [m for m in _scan_metadatas(vectorstore)
+                if (m or {}).get("source_site") in COMMUNITY_SITES]
+    old_hashes = sorted({m.get("doc_hash") for m in old_rows
+                         if m.get("doc_hash")})
+    # Add first, then delete the previous month: an add failure leaves the old
+    # chunks intact (delete-then-add could wipe them mid-ingest).
+    vectorstore.add_documents(splits)
+    if old_hashes:
+        vectorstore._collection.delete(
+            where={"source_site": "ntuchealth.sg",
+                   "doc_hash": {"$in": old_hashes}})
+    _meta_scan_cache = None  # a replace can leave the doc count unchanged
+    return {"status": "refreshed", "centres": len(pairs), "ok": len(docs),
+            "failed": failed, "chunks_added": len(splits),
+            "chunks_removed": len(old_rows), "calendar_months": months,
+            "refreshed_at": refreshed_at}
+
+
 def list_pdfs():
-    """One row per ingested PDF: doc_hash, title, source, chunks."""
+    """One row per ingested guideline PDF: doc_hash, title, source, chunks.
+
+    Community calendars (COMMUNITY_SITES) are excluded — they are listed under
+    the `community` bucket in list_corpus()."""
     vectorstore = load_vectorstore()
     agg = {}
     for m in _scan_metadatas(vectorstore):
         m = m or {}
         if not m.get("doc_hash"):
+            continue
+        if m.get("source_site") in COMMUNITY_SITES:
             continue
         e = agg.setdefault(m["doc_hash"], {
             "title": m.get("doc_title", "?"),
@@ -369,8 +623,10 @@ def _site_of(url):
 def list_corpus():
     """Full corpus inventory (read-only metadata scan, 0 API credits).
 
-    PDFs grouped by doc_hash (mirrors list_pdfs()); web sources grouped by
-    source_site — legacy no-site chunks fall back to the URL host (_site_of).
+    Guideline PDFs grouped by doc_hash (mirrors list_pdfs()); community
+    calendars (COMMUNITY_SITES) in their own `community` bucket; web sources
+    grouped by source_site — legacy no-site chunks fall back to the URL host
+    (_site_of).
     `protocol_pages` counts unique URLs under the /care-protocols/ path (the
     depth-2 crawl also captured site nav pages and a few link artifacts;
     they stay in web_sources for the raw inventory). Derived titles are
@@ -379,15 +635,20 @@ def list_corpus():
     """
     vs = load_vectorstore()
     rows = _scan_metadatas(vs)
-    pdfs, web = {}, {}
+    pdfs, web, community = {}, {}, {}
     for m in rows:
         m = m or {}
         src = m.get("source") or ""
         site = m.get("source_site") or _site_of(src)
         if m.get("doc_hash"):
-            entry = pdfs.setdefault(m["doc_hash"], {
-                "title": m.get("doc_title") or "?", "source": src,
-                "chunks": 0, "doc_hash": m["doc_hash"]})
+            base = {"title": m.get("doc_title") or "?", "source": src,
+                    "chunks": 0, "doc_hash": m["doc_hash"]}
+            if site in COMMUNITY_SITES:
+                entry = community.setdefault(m["doc_hash"], dict(base))
+                entry["calendar_month"] = m.get("calendar_month") or ""
+                entry["refreshed_at"] = m.get("community_refreshed_at") or ""
+            else:
+                entry = pdfs.setdefault(m["doc_hash"], base)
             entry["chunks"] += 1
         elif site and src:
             entry = web.setdefault(site, {}).setdefault(src, {
@@ -395,14 +656,25 @@ def list_corpus():
             entry["chunks"] += 1
     protocol_pages = sum(1 for urls in web.values()
                          for e in urls.values() if "/care-protocols/" in e["url"])
+    community_rows = sorted(community.values(), key=lambda p: p["title"].lower())
+    community_months = sorted({c["calendar_month"] for c in community_rows
+                               if c["calendar_month"]})
+    community_refreshed = max((c["refreshed_at"] for c in community_rows
+                               if c["refreshed_at"]), default="")
     return {
         "totals": {
             "chunks": len(rows),
             "guideline_pdfs": len(pdfs),
             "protocol_pages": protocol_pages,
             "public_guidance_pages": sum(1 for _ in web.get("moh.gov.sg", {})),
+            "community_centres": len(community_rows),
         },
         "pdfs": sorted(pdfs.values(), key=lambda p: p["title"].lower()),
+        "community": {
+            "centres": community_rows,
+            "months": community_months,
+            "refreshed_at": community_refreshed,
+        },
         "web_sources": {site: sorted(urls.values(), key=lambda e: e["url"])
                         for site, urls in sorted(web.items())},
     }
@@ -424,9 +696,27 @@ def _active_protocol_names(context_provider) -> list:
     return names
 
 
+# Phase 7: community-intent gate for _steer_query. The protocol-name suffix
+# biases the embedding toward clinical chunks and was drowning out the NTUC
+# calendar chunks for community questions (2026-09-10: the raw question ranked
+# the Redhill calendar #1; the same question through the steered retriever
+# returned zero community chunks). Deliberately narrow — a clinical question
+# that merely mentions "exercise"/"activities" (e.g. cardiac rehab) keeps its
+# steering; only explicit community-programme phrasing skips it.
+_COMMUNITY_INTENT_RE = re.compile(
+    r"\b(ntuc|active[- ]age|communit|programmes?|programs?|activit|workshops?|"
+    r"classes?|volunteer|day ?care|dinner|digital skills?|seniors?|"
+    r"older (people|adults|persons)|social (activities?|support|engagement))\b",
+    re.IGNORECASE)
+
+
 def _steer_query(question: str, context_provider) -> str:
     """Append active protocol names for the RETRIEVER only — the LLM prompt
-    keeps the original question."""
+    keeps the original question. Skipped for community-intent questions
+    (Phase 7) so the NTUC calendar chunks are not crowded out (see
+    _COMMUNITY_INTENT_RE above)."""
+    if _COMMUNITY_INTENT_RE.search(question or ""):
+        return question
     names = _active_protocol_names(context_provider)
     if not names:
         return question
@@ -436,7 +726,7 @@ def _steer_query(question: str, context_provider) -> str:
 def _prepare_sections(docs: list, question: str, context_provider) -> dict:
     """Split retrieved chunks by provenance and attach the live-context
     sections (basis rule: `derived`/`none` links never become protocol content)."""
-    protocol_parts, public_parts, guideline_parts = [], [], []
+    protocol_parts, public_parts, guideline_parts, community_parts = [], [], [], []
     for d in docs or []:
         site = d.metadata.get("source_site", "primarycarepages.sg")
         body = (d.page_content or "").strip()
@@ -451,6 +741,10 @@ def _prepare_sections(docs: list, question: str, context_provider) -> dict:
             guideline_parts.append(
                 "%s\n[%s] %s"
                 % (body, d.metadata.get("doc_title", "guideline"), ref))
+        elif site in COMMUNITY_SITES:
+            community_parts.append(
+                "%s\n[%s — community resource, not clinical content] %s"
+                % (body, site, ref))
         else:
             protocol_parts.append("%s\n[%s] %s" % (body, site, ref))
 
@@ -478,6 +772,8 @@ def _prepare_sections(docs: list, question: str, context_provider) -> dict:
         "guidelines": ("\n\n---\n\n".join(guideline_parts)
                        or "(no clinical guidelines retrieved for this question)"),
         "public_guidance": "\n\n---\n\n".join(public_parts) or "(none)",
+        "community_resources": ("\n\n---\n\n".join(community_parts)
+                                or "(no community resources retrieved for this question)"),
         "local_context": local_ctx,
         "clinic": clinic,
         "as_of": as_of,
@@ -489,11 +785,6 @@ def build_chain(vectorstore: Chroma, context_provider=None):
     """context_provider: callable() -> snapshot dict or None. app.py serves it
     from the same 15-min cache as GET /api/context; the chat path never blocks
     on a build (a cold cache degrades the prompt to 'context unavailable')."""
-    # Bounded provider calls: the free tier is slow and 429-prone; without
-    # explicit caps a hung request would sit for ~30 min (openai client
-    # defaults: 600 s/attempt x 3 tries) before surfacing as an error.
-    llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL,
-                     temperature=0, timeout=300, max_retries=1)
     # k=5 was tuned for the small protocol corpus; with the Phase 5 guideline
     # PDFs (~3k chunks, a single ACG can span 30+ chunks) 5 retrieved chunks
     # surfaced only titles/intro text for longer guidelines. 12 keeps the
@@ -501,12 +792,14 @@ def build_chain(vectorstore: Chroma, context_provider=None):
     # guideline's relevant section.
     retriever = vectorstore.as_retriever(search_kwargs={"k": 12})
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-    answer_chain = prompt | llm | StrOutputParser()
 
     def _run(state: dict) -> dict:
         docs = state.get("context") or []
         question = state["question"]
-        answer = answer_chain.invoke(_prepare_sections(docs, question, context_provider))
+        # Chat model is picked at INVOKE time (not build time) so the UI
+        # provider toggle takes effect on the next request, no restart.
+        answer = (prompt | make_chat_llm() | StrOutputParser()).invoke(
+            _prepare_sections(docs, question, context_provider))
         return {"answer": answer, "question": question, "context": docs}
 
     return (
@@ -593,9 +886,9 @@ def generate_brief(system, user):
     embedding calls, 0 retrieval.
     """
     # Explicit max_tokens: the default cap cut the brief JSON mid-string,
-    # which is what most often trips the parse fallback.
-    llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL,
-                     temperature=0, timeout=300, max_retries=1, max_tokens=4000)
+    # which is what most often trips the parse fallback. Provider is the
+    # UI-selected one (read at call time, like the chat path).
+    llm = make_chat_llm(max_tokens=4000)
     resp = llm.invoke([("system", system), ("human", user)])
     text = resp if isinstance(resp, str) else str(getattr(resp, "content", resp))
     return _parse_and_guard(text)

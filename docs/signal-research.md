@@ -657,3 +657,194 @@ min; failure sentinel 90 s; force-regenerate cooldown 60 s.
 design); the depth-2 crawl's URL sprawl is visible in the Library
 (collapsed by design).
 
+## 17. Phase 7 build notes — NTUC community calendars (2026-09-10)
+
+**What:** the 26 NTUC Health Active Ageing Centre programme calendars
+(centre-specific PDFs linked from the NTUC landing page) are ingested into
+the main Chroma collection as a fifth, explicitly non-clinical source.
+Prompts carry a `Community resources` section; community answers must be
+labelled community activities and may never be cited as protocol or
+guideline content.
+
+**Design (decisions):**
+- `rag.COMMUNITY_SITES = {"ntuchealth.sg"}`, parallel to the existing
+  `PUBLIC_GUIDANCE_SITES` / `GUIDELINE_SITES`; `_prepare_sections()` routes
+  on `source_site` metadata into a fifth standalone prompt section,
+  `Community resources`, tagged "not clinical content".
+- `fetch_community_calendars()` parses centre PDF links from the NTUC landing
+  page (no hardcoded centre list — the page is the source of truth).
+- `ingest_community_refresh()` is replace-only, scoped to
+  `source_site == ntuchealth.sg`: add-then-delete (a broken month never wipes
+  existing data), idempotent via `doc_hash` (identical PDFs no-op),
+  structural guards (zero PDFs, <100 or >600 chunks all fail closed,
+  store untouched).
+- `app.py POST /api/community/refresh`: 409 while a run is in flight,
+  429 within 60 s of the last success, 502 on structural failure (store
+  untouched), 200 with `{"status": "updated"|"up-to-date", "centres",
+  "ok", "failed", "chunks_added", "chunks_removed", "calendar_months"}`;
+  the chat chain is rebuilt only when the store actually changed.
+- Deliberately NOT in `SOURCES`: calendars are not a fetchable corpus
+  source — they have their own endpoint, not the general refresh.
+- `list_pdfs()` still excludes them (Library PDF list unchanged, 96
+  guideline PDFs); `list_corpus()` gains a `community` bucket: centres,
+  months, `total_chunks`, `refreshed_at`. `refreshed_at` is written per
+  chunk at ingest time and surfaced in the Library bar.
+
+**Retrieval fix (steering gate):** the first community probe returned an
+empty `Community resources` section. Cause: `_steer_query()` appends the
+active protocol names for the retriever, which biases the embedding toward
+clinical chunks — the raw question ranked the Redhill calendar #1, but the
+steered query returned zero community chunks in the top 12. Fix:
+`_COMMUNITY_INTENT_RE` (ntuc, active-ageing, communit-, programme, activit-,
+workshop, class, volunteer, day care, dinner, digital skills, senior,
+older people/adults, social activity) makes community-intent questions skip
+the steering suffix. Clinical questions are unchanged.
+
+**Verified.** 2026-09-10, 4th session:
+- First refresh: 26 centres, 386 chunks, 0 failures, all month=2026-09
+  (~15 s, embed-only spend).
+- Second refresh: `up-to-date`, 0 chunks added/removed (~10 s, zero
+  embedding calls).
+- Live NTUC page lists exactly 26 calendar PDFs (matches ingest).
+- `/api/library` shows the community bucket with `refreshed_at`;
+  `/api/pdfs` still lists the 96 guideline PDFs.
+- Community probe (local vLLM, free): "What programmes are available for
+  older people at the Redhill Active Ageing Centre this month?" answered
+  from the Redhill 2026-09 calendar with named programmes (Dragon Boat,
+  Piloxing, Walking Football, Fab Lab workshops, haircuts, pedicure);
+  sources = Redhill / Bukit Panjang / Nanyang calendars.
+- Clinical negative probe: asthma inhaler technique answered from the
+  asthma protocol + ACG guideline; no calendar cited.
+- Guards: 409 in-flight, 429 within 60 s cooldown confirmed.
+
+**Known boundaries:** the calendar month is whatever NTUC publishes now
+(2026-09 at write time); an October page update changes `calendar_months`
+on the next refresh. The intent regex is deliberately narrow — a clinical
+question that merely mentions "exercise"/"activities" (e.g. cardiac rehab)
+keeps its steering. Refresh replaces the whole centre set from the current
+live page; a month's calendars are not retained historically.
+
+## 18. Phase 8 build notes — URA planning zoom (2026-09-10)
+
+User feedback on the Phase 4/6 tile: a bare "N healthcare-related decisions"
+is not actionable for a GP; wanted senior-care / nursing-home visibility, a
+boundary, and the (static) Nearest polyclinic tile removed.
+
+- **Category buckets** (`context/ura.py`): keyword priority Nursing home >
+  Senior care > Child care > Polyclinic > Clinic > Medical > Other;
+  `category_counts` in the payload (over all in-window rows, not just the
+  listed cap). VETERINARY rows now DROPPED (previously matched CLINIC).
+- **Honest 90-day window**: `window_decisions()` re-filters to
+  decision_date inside the window (the API's `last_dnload_date` filters on
+  record created/modified date — Phase 4 observed decision dates months old).
+  Dropped count surfaced as `stale_dropped`.
+- **Boundary** (user's choice): street-name → area heuristic, OFFLINE —
+  `config.STREET_AREA_HINTS` (first token match, ~55 tokens, 8 area groups),
+  enriched in `snapshot.py::_enrich_ura` with `district` / `approx_km` /
+  `distance_band` (near ≤ 10 km / mid ≤ 25 / far > 25 to the area CENTROID —
+  rough). Unmapped addresses get no fields. Live coverage at build time:
+  24/67 in-window rows mapped (19/50 listed rows after the cap; 31 listed
+  rows unmapped). Ruled out: OneMap geocoding (API hosts fail DNS on this
+  network, §15–§16); Nominatim (reachable, but a new external dependency —
+  rejected).
+- **Tile** (Brief): "N decisions" sub-line now "k near (~10 km) · a senior
+  care · b nursing home · c child care · d clinic/medical · e polyclinic".
+  **Card** (raw context): grouped by category, each row tagged
+  `[district · ~km]`. **Nearest polyclinic tile REMOVED** (static data, no
+  signal); data kept in the RAG prompt Local context + raw-context list.
+- **Prompt/brief/CLI**: category split + near-clinic count added to the URA
+  Local-context line, brief `planning` projection, and CLI PLANNING.
+- **Cache**: `ura_planning_v2.json` (schema bump forces one refetch).
+  `URA_MAX_ITEMS` 20 → 50 (near-count + card coverage).
+- **Known limitations**: centroid distance ≠ facility distance;
+  `near_clinic_count` covers the listed cap (50) only; unmapped addresses:
+  31 of 50 listed rows (no street-name hint match); the headline count now
+  excludes vet rows and stale-dated rows (in the live 2026-09-10 window:
+  4 vet rows and 4 stale-dated rows dropped — 71 → 67 in-window).
+- **Live verification** (2026-09-10, window 2026-06-12 → 2026-09-10,
+  0 paid credits; all gates ran on seeded caches, one real URA fetch for
+  these numbers): 2,361 API rows scanned; 67 in-window decisions —
+  5 senior care, 6 nursing home, 12 child care, 3 polyclinic, 38 clinic,
+  3 medical; `near_clinic_count` = 2 (bands of the 19 mapped listed rows:
+  2 near / 14 mid / 3 far). CLI PLANNING header shows the split + "2 within
+  ~10 km", rows tagged `(category) [district ~km]`. `/api/context` live:
+  `category_counts` + `near_clinic_count` + per-row `district`/`approx_km`
+  present, `data_gaps` empty. Prompt line renders "(5 senior care, 6
+  nursing home, 12 child care, 3 polyclinic, 38 clinic, 3 medical), 2
+  within ~10 km of the clinic". Brief `planning` projection carries
+  `category_counts` + `near_clinic_count`. Tile sub-line renders
+  "2 near (~10 km) · 5 senior care · 6 nursing home · 12 child care ·
+  41 clinic/medical · 3 polyclinic" (41 = 38 clinic + 3 medical).
+
+
+
+## 19. Phase 9 build notes — 2 km catchment + Active Ageing card (2026-09-10)
+
+User request: the 90-day planning view should use a **2 km radius**, its
+title should be **layperson-friendly**, and the dashboard should gain an
+**Active Ageing Programmes card for NTUC centres within 2 km**.
+
+- **URA near band**: `config.URA_NEAR_KM` 10 → **2.0** — the "near" band
+  of the planning view is now the walkable catchment (mid ≤ 25 km and
+  far > 25 km unchanged). Rationale: a GP's patient catchment is
+  ~1–2 km; the 10 km "near" band made the near-count meaningless
+  (everything island-wide was "nearish"). Tile renamed `Planning 90d`
+  → **`New health facilities (3 mo)`**; sub-line "k near (~10 km)" →
+  "k near (~2 km)"; same change in the prompt line and CLI.
+- **NTUC Active Ageing centre locations** (no geocoding needed):
+  `ntuchealth.sg/active-ageing/locations` is a Next.js page whose flight
+  payload embeds each centre's exact `position` (lat/lon) keyed by
+  `name`. Verified live 2026-09-10: 27 centres, all matching the
+  calendar-page anchor text exactly. Stored statically in
+  `config.ACTIVE_AGING_CENTRES` (27×(name, lat, lon)) — updating is a
+  one-line-per-centre change if NTUC adds/renames a centre.
+- **NTUC calendar PDF source**: `ntuchealth.sg/active-ageing`
+  (landing page) lists, per centre, a monthly programme-calendar PDF at
+  `assets.ntuchealth.sg/ae/<centre>-<Mon>-<YYYY>.pdf`, keyed by centre
+  name in the anchor text. The PDFs rotate monthly (Sep 2026 at write
+  time) and are the SAME source as the Phase 7 RAG corpus — the card
+  just links to them; no new corpus content.
+- **Browser UA required**: the site is Akamai-fronted; the default
+  python UA is 403. `config.NTUC_UA` is a Chrome/124 UA (same
+  workaround class as WIDB's `http.py`).
+- **`context/community.py`** (new, stdlib, key-free): fetches the
+  landing page, regex-parses the anchors (name, month, pdf_url),
+  dedupes by centre name, disk-caches 24 h at
+  `config.CACHE_DIR/ntuc_ageing_v1.json`, returns
+  `{count, calendar_months, centres[], caveat}`. The caveat DYNAMICALLY
+  detects shared-PDF quirks: if one pdf_url serves >1 centre name, it
+  names them (2026-09-10 live: 'Bukit Batok West' reuses the
+  Bedok-North PDF — an NTUC site bug, not ours).
+- **Snapshot**: `active_ageing` block = fetched centres +
+  `snapshot._enrich_ageing()` (km to 1 dp via haversine to the
+  NTUC-published centre position — exact, unlike the URA
+  street-heuristic — `near` ≤ `ACTIVE_AGING_NEAR_KM` = 2.0, plus
+  `near_count`). A live centre missing from the config table renders
+  without `km` (listed, never `near`). Failure → `data_gaps:
+  "active_ageing: ..."`, never a crash.
+- **Frontend**: new KPI tile **`Active Ageing (2 km)`** (value "N
+  centre(s)", sub = the within-2 km names + km); new raw-context card
+  **`Active Ageing (NTUC Health, island-wide)`** — all centres
+  nearest-first, within-2 km bolded, each row a link to the current
+  month's calendar PDF + the caveat line; chip "Active Ageing: N within
+  2 km". Drive-by fix: the raw-context "Nearest polyclinics" list read
+  `nearest_services.pyclinics` (typo) and silently never rendered —
+  now `polyclinics` (same typo class as the `brief.py` `pyclinics`
+  projection fix).
+- **Prompt**: Local context gains an NTUC line — N centres island-wide
+  (calendar month), the near ones named with km, explicitly
+  **NON-clinical**, calendar questions answered from the Community
+  resources corpus section, never as clinical services.
+- **Out of scope (deliberate)**: the clinician brief (brief.py) does
+  NOT project `active_ageing` — its source whitelist
+  ("NEA | data.gov.sg | CDA WIDB | URA | derived") has no NTUC and the
+  brief stays clinical. If wanted: add "NTUC" to the whitelist + a
+  small projection block (data already in the snapshot).
+- **Live verification** (2026-09-10, 0 paid credits): one real NTUC
+  fetch → 27 centres, month "Sep 2026", live-name set == config set
+  (0 unmapped, 0 orphans); at the test clinic `near_count` = 3 (Jurong
+  Central Plaza 0.8, Boon Lay 1.1, Taman Jurong 1.2 km; next-closest
+  Gek Poh 2.2, Pioneer 2.3 — correctly outside 2 km); shared-PDF caveat
+  rendered for Bukit Batok West. `node --check` on the page JS;
+  py_compile on all touched modules.
+

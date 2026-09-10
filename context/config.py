@@ -35,9 +35,123 @@ WIDB_CACHE_TTL_SECONDS = 3 * 24 * 3600  # weekly publication cadence
 URA_BASE = "https://eservice.ura.gov.sg/uraDataService"
 URA_WINDOW_DAYS = 90             # last_dnload_date window (API max lookback: 1 year)
 URA_CACHE_TTL_SECONDS = 24 * 3600  # data cadence is daily; token valid for the day
-URA_MAX_ITEMS = 20               # snapshot cap on the decision list (count stays full)
+URA_MAX_ITEMS = 50               # snapshot cap on the decision list (Phase 8: 20->50 so category + near counts cover more rows)
 URA_HEALTHCARE_KEYWORDS = ("POLYCLINIC", "CLINIC", "MEDICAL", "NURSING HOME",
                            "CHILD CARE", "SENIOR")
+# "near clinic" band for the street-area heuristic (rough: distance to an area
+# centroid, not the facility). Phase 9 (2026-09-10): 10 -> 2 km so the "near"
+# count reflects the walkable catchment rather than the whole western island.
+URA_NEAR_KM = 2.0
+
+# --- NTUC Health Active Ageing (Phase 9 — community referral signal) -------------
+# The LIVE centre set + monthly programme-calendar PDFs come from the calendar
+# landing page (one PDF per centre, rotates monthly — the same source
+# rag.py's ingest_community_refresh() ingests). Centre coordinates are STATIC:
+# verified live 2026-09-10 from https://ntuchealth.sg/active-ageing/locations
+# (Next.js flight payload, per-centre `position` fields). Centres rarely move;
+# if the live set gains a centre missing here, it renders with no distance
+# (extend this table). Names match the calendar-page anchor text exactly.
+NTUC_CALENDAR_URL = ("https://ntuchealth.sg/active-ageing/services/"
+                     "active-ageing-programme-calendars")
+NTUC_UA = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 "
+                   "Safari/537.36"),
+    "Accept-Language": "en-SG,en;q=0.9",
+}
+NTUC_CACHE_TTL_SECONDS = 24 * 3600   # centre set changes rarely; month rotates
+ACTIVE_AGING_NEAR_KM = 2.0           # "within 2 km" band for the dashboard card
+ACTIVE_AGING_CENTRES = (
+    ("Bishan", 1.358589, 103.845633),
+    ("Boon Lay", 1.346983, 103.708823),
+    ("Bukit Batok West", 1.356857, 103.740045),
+    ("Bukit Merah", 1.281860, 103.826590),
+    ("Bukit Merah Silat", 1.277398, 103.830521),
+    ("Bukit Merah View", 1.284263, 103.821965),
+    ("Bukit Panjang", 1.377576, 103.772503),
+    ("Bedok North", 1.330432, 103.932571),
+    ("Gek Poh", 1.347500, 103.699177),
+    ("Jurong Central Plaza", 1.349189, 103.725004),
+    ("Kampung Admiralty", 1.440064, 103.800795),
+    ("Kampung Kembangan", 1.325561, 103.910794),
+    ("Lengkok Bahru", 1.288213, 103.814203),
+    ("Marsiling", 1.439203, 103.778010),
+    ("Marsiling Park", 1.435072, 103.774243),
+    ("Mount Faber", 1.274362, 103.808792),
+    ("Nanyang", 1.344567, 103.693268),
+    ("Pasir Ris", 1.367630, 103.956280),
+    ("Pioneer", 1.336961, 103.700276),
+    ("Redhill", 1.287395, 103.817332),
+    ("Serangoon Central", 1.348158, 103.874808),
+    ("Taman Jurong", 1.335681, 103.722648),
+    ("Tampines", 1.349719, 103.951372),
+    ("Telok Blangah", 1.271528, 103.823027),
+    ("Whampoa", 1.327748, 103.861187),
+    ("Wisma Geylang Serai", 1.314880, 103.896670),
+    ("Woodlands East", 1.439810, 103.803586),
+)
+
+# Phase 8: street-name -> (area label, approx centroid). First hint whose token
+# appears in the UPPERCASE address wins. Coarse, documented heuristic — no
+# geocoder is reachable on this network (docs/signal-research.md §15–§16).
+STREET_AREA_HINTS = (
+    # Central (Orchard / Tanjong Pagar / Chinatown / River Valley / Kitchener)
+    ("ORCHARD", "Central", 1.3042, 103.8318),
+    ("CATHAY", "Central", 1.3042, 103.8318),
+    ("STAMFORD", "Central", 1.3042, 103.8318),
+    ("RAFFLES", "Central", 1.2910, 103.8520),
+    ("RIVER VALLEY", "Central", 1.2962, 103.8405),
+    ("KITCHENER", "Central", 1.3098, 103.8521),
+    ("NORTH BRIDGE", "Central", 1.2910, 103.8510),
+    ("BRAS BASAH", "Central", 1.2975, 103.8505),
+    ("PLAYFAIR", "Central", 1.2930, 103.8440),
+    ("TANJONG PAGAR", "Central", 1.2760, 103.8440),
+    ("TANJONG KATONG", "Central", 1.3080, 103.8540),
+    ("MAXWELL", "Central", 1.2800, 103.8460),
+    ("OUTRAM", "Central", 1.2800, 103.8440),
+    ("CHINATOWN", "Central", 1.2840, 103.8450),
+    ("PECK SIAH", "Central", 1.2790, 103.8430),
+    ("BENCOOLEN", "Central", 1.2870, 103.8400),
+    # Bukit Merah / one-north
+    ("BUKIT MERAH", "Bukit Merah / one-north", 1.3010, 103.7950),
+    ("ONE-NORTH", "Bukit Merah / one-north", 1.3000, 103.7900),
+    ("KALLAWAY", "Bukit Merah / one-north", 1.3160, 103.7930),
+    # Bedok / Changi
+    ("BEDOK", "Bedok / Changi", 1.3250, 103.9300),
+    ("CHANGI", "Bedok / Changi", 1.3450, 103.9550),
+    ("TAN TONG", "Bedok / Changi", 1.3310, 103.9450),
+    ("MARSILING", "Bedok / Changi", 1.3250, 103.9520),
+    ("CHAI CHEE", "Bedok / Changi", 1.3260, 103.9190),
+    ("JOO CHIAT", "Bedok / Changi", 1.3140, 103.8950),
+    # Queenstown / Redhill
+    ("QUEENSTOWN", "Queenstown / Redhill", 1.2960, 103.8150),
+    ("REDHILL", "Queenstown / Redhill", 1.3020, 103.8130),
+    ("TAMAY", "Queenstown / Redhill", 1.2920, 103.8170),
+    ("HOLLIS", "Queenstown / Redhill", 1.3050, 103.8150),
+    # West (Clementi / Jurong / Bukit Batok)
+    ("BUKIT BATOK", "West (Clementi / Jurong)", 1.3500, 103.7500),
+    ("CLEMENTI", "West (Clementi / Jurong)", 1.3140, 103.7650),
+    ("JURONG", "West (Clementi / Jurong)", 1.3400, 103.7100),
+    ("BOON LAY", "West (Clementi / Jurong)", 1.3380, 103.7070),
+    ("TENNYSON", "West (Clementi / Jurong)", 1.3220, 103.7700),
+    ("GARDEN CITY", "West (Clementi / Jurong)", 1.3180, 103.7720),
+    ("CHOA CHU KANG", "West (Clementi / Jurong)", 1.3870, 103.7460),
+    # North (Woodlands / Yishun / Hougang)
+    ("WOODLANDS", "North (Woodlands / Yishun)", 1.4380, 103.7860),
+    ("YISHUN", "North (Woodlands / Yishun)", 1.4290, 103.8360),
+    ("HOUGANG", "North (Woodlands / Yishun)", 1.3710, 103.8920),
+    ("KUNINGAL", "North (Woodlands / Yishun)", 1.3560, 103.9060),
+    ("TAI THONG", "North (Woodlands / Yishun)", 1.3730, 103.8950),
+    ("SEMAKA", "North (Woodlands / Yishun)", 1.3670, 103.9010),
+    # East (Sengkang / Punggol / Tampines)
+    ("TAMPINES", "East (Sengkang / Punggol / Tampines)", 1.3530, 103.9440),
+    ("SIMEI", "East (Sengkang / Punggol / Tampines)", 1.3460, 103.9560),
+    ("SIMPANG", "East (Sengkang / Punggol / Tampines)", 1.4000, 103.9200),
+    ("SENGKANG", "East (Sengkang / Punggol / Tampines)", 1.3960, 103.9600),
+    ("PUNGGOL", "East (Sengkang / Punggol / Tampines)", 1.4000, 103.9100),
+    ("LOMONDA", "East (Sengkang / Punggol / Tampines)", 1.3900, 103.9100),
+    ("CHANDIGARTH", "East (Sengkang / Punggol / Tampines)", 1.3850, 103.9050),
+)
 
 # --- GEOJSON via v1 poll-download (key-free) -------------------------------------
 V1_POLL = "https://api-open.data.gov.sg/v1/public/api/datasets/{did}/poll-download"

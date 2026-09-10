@@ -117,15 +117,40 @@ def main(argv=None):
 
     cc = snap.get("catchment_change") or {}
     if cc.get("healthcare_decisions_90d_count") is not None:
-        print("PLANNING URA written permissions %s: %d healthcare-related (of %d rows)"
+        counts = cc.get("category_counts") or {}
+        count_str = ", ".join("%d %s" % (counts[k], k.lower())
+                              for k in ("Senior care", "Nursing home", "Child care",
+                                        "Polyclinic", "Clinic", "Medical", "Other")
+                              if counts.get(k))
+        print("PLANNING URA written permissions %s: %d healthcare-related (of %d rows)%s%s"
               % (cc.get("window") or "?", cc["healthcare_decisions_90d_count"],
-                 cc.get("rows_scanned", 0)))
+                 cc.get("rows_scanned", 0),
+                 (": " + count_str) if count_str else "",
+                 ("; %d within ~2 km" % cc["near_clinic_count"])
+                 if cc.get("near_clinic_count") else ""))
         for a in cc.get("healthcare_decisions_90d") or []:
-            print("         - %s: %s — %s [%s]"
+            loc = " [%s ~%s km]" % (a["district"], a["approx_km"]) if a.get("district") else ""
+            cat = (" (%s)" % a["category"]) if a.get("category") else ""
+            print("         - %s: %s — %s [%s]%s%s"
                   % (a.get("date") or "?", a.get("address") or "?",
-                     (a.get("what") or "?")[:70], a.get("decision_type") or "?"))
+                     (a.get("what") or "?")[:70], a.get("decision_type") or "?", cat, loc))
         if not cc.get("healthcare_decisions_90d"):
             print("         - none in window")
+
+    aa = snap.get("active_ageing") or {}
+    if aa.get("count") is not None:
+        months = ",".join(aa.get("calendar_months") or []) or "?"
+        near_n = sum(1 for c in (aa.get("centres") or []) if c.get("near"))
+        print("AGEING   NTUC Active Ageing centres: %d island-wide (calendar %s); %d within ~2 km"
+              % (aa.get("count", 0), months, near_n))
+        rows = sorted((c for c in (aa.get("centres") or []) if c.get("km") is not None),
+                      key=lambda c: c["km"])
+        for c in rows:
+            mark = "  *within 2 km*" if c.get("near") else ""
+            print("         - %s: %.1f km%s" % (c["name"], c["km"], mark))
+        for c in (aa.get("centres") or []):
+            if c.get("km") is None:
+                print("         - %s (no coordinates in config.ACTIVE_AGING_CENTRES)" % c["name"])
 
     if "nearest_services" in snap:
         for p in snap["nearest_services"]["polyclinics"]:

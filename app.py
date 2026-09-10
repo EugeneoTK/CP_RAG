@@ -14,7 +14,8 @@ from pydantic import BaseModel
 load_dotenv()
 
 from rag import (build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR,
-                 ingest_pdf, list_corpus, list_pdfs, MAX_PDF_BYTES, generate_brief)
+                 ingest_pdf, list_corpus, list_pdfs, MAX_PDF_BYTES, generate_brief,
+                 provider_info, set_provider, ingest_community_refresh)
 from context.brief import format_brief_prompt
 from context.config import POSTCODE_DISTRICTS, TEST_CLINIC
 from context.snapshot import build_snapshot
@@ -202,6 +203,50 @@ async def run_ingest_append():
             "sources_added": sources_added, "sources_skipped": sources_skipped}
 
 
+# --- Phase 7: community calendars (user-triggered monthly refresh) ----------------
+# Replace semantics: previous-month chunks deleted, current per-centre PDFs
+# embedded (only ntuchealth.sg chunks are ever touched; the rest of the corpus
+# is never re-embedded). 409 while in flight + 60-s success cooldown (brief
+# D5/D6 pattern); 502 "store untouched" on a structural failure.
+COMMUNITY_REFRESH_COOLDOWN_S = 60
+_community_refresh = {"running": False, "last_run": None}
+
+
+@app.post("/api/community/refresh")
+async def community_refresh():
+    """User-triggered refresh of the NTUC Active Ageing community calendars.
+
+    Fails fast (store untouched) when the landing page yields no parseable
+    PDFs — a broken month never wipes the good data. Rebuilds the chain only
+    when the store actually changed."""
+    global rag_chain
+    if rag_chain is None:
+        raise HTTPException(503, "Knowledge base not ready — run `venv/bin/python -m rag` first")
+    now = time.monotonic()
+    if _community_refresh["running"]:
+        raise HTTPException(409, "Community refresh already in flight — wait for it to finish")
+    last = _community_refresh["last_run"]
+    if last is not None and now - last < COMMUNITY_REFRESH_COOLDOWN_S:
+        wait = int(COMMUNITY_REFRESH_COOLDOWN_S - (now - last))
+        raise HTTPException(429, "Refresh cooldown — try again in %ss" % wait,
+                            headers={"Retry-After": str(wait)})
+    _community_refresh["running"] = True
+    try:
+        summary = await asyncio.get_running_loop().run_in_executor(
+            None, ingest_community_refresh)
+    except RuntimeError as e:
+        raise HTTPException(502, "Community refresh failed (store untouched): %s" % e)
+    except Exception as e:
+        raise HTTPException(502, "Community refresh failed: %s" % e)
+    finally:
+        _community_refresh["running"] = False
+    _community_refresh["last_run"] = time.monotonic()
+    if summary.get("status") != "up-to-date":
+        vectorstore = load_vectorstore()
+        rag_chain = build_chain(vectorstore, context_provider=get_context_snapshot)
+    return summary
+
+
 @app.post("/api/ingest-pdf")
 async def run_ingest_pdf(file: UploadFile = File(...),
                          title: str = Form(""), source: str = Form("")):
@@ -369,6 +414,32 @@ async def status():
     else:
         ctx = "not-built"
     return {"ready": rag_chain is not None, "context": ctx}
+
+
+# --- chat-model provider switch (UI header toggle) ----------------------------------
+# Only the CHAT path (RAG answers + brief) is switchable. Embeddings stay
+# pinned to the OpenAI-compatible config: the store was embedded with
+# EMBED_MODEL, and retrieval against that index requires the same model.
+
+class ProviderRequest(BaseModel):
+    provider: str
+
+
+@app.get("/api/provider")
+async def provider_get():
+    """Free: active chat-model provider + available ones (key-free view)."""
+    return provider_info()
+
+
+@app.post("/api/provider")
+async def provider_switch(req: ProviderRequest):
+    """Config-only switch — no connectivity probe, 0 credits."""
+    try:
+        set_provider(req.provider)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _brief_cache.clear()  # any cached brief was written by the previous model
+    return provider_info()
 
 
 def _resolve_clinic_point(lat, lon, postcode, name):

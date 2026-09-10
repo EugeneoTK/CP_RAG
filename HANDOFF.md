@@ -1,65 +1,149 @@
-# HANDOFF — CP_RAG (updated 2026-09-10 — SGDS UI reverted to pre-SGDS design per user preference, committed + pushed)
+# HANDOFF — CP_RAG (overwritten 2026-09-10, 6th session)
 
-## Done this session (2026-09-10)
-**All work committed** — `ce43834` (fix: brief generation) + `f626a07` (feat: SGDS v3 UI migration + static asset serving), pushed with this docs commit.
+## Done this session
 
-### 1. UI overhaul (`static/index.html`)
-- Design-system variable set (`:root` tokens; accent `#2563eb`, surface `#fff`, radius 16px cards / 10px tabs); consistent type scale and button styles; header with app title + "Ready" pill.
-- Brief tab: grouped control bar; 6 KPI tiles in a balanced 2×3 grid; watch cards with uppercase "Why it matters" / "Action" labels; bordered outlook card; provenance note.
-- "Planning 90d" tile → plain English `CLINIC PLANS (URA)` ("74 approvals · healthcare-related, past 90 days · approved, may not be open yet"); detail card note clarifies approvals ≠ open facilities.
-- Chat tab renamed → "Clinical Flight Bag" (label-only); grounded empty-state copy ("Ask about chronic-disease care — asthma, diabetes, hypertension, COPD, CKD, and more.").
-
-### 2. Truncated-brief root cause + recovery
-Root cause: brief generation hit the provider's default `max_tokens` cap → JSON cut mid-string → "Brief unavailable."
-- `rag.py` `generate_brief()` — explicit `max_tokens=4000` (primary fix).
-- `rag.py` `_parse_brief()` — tolerates prose around the JSON (extracts the outermost `{...}` span before `json.loads`).
-- `rag.py` `_parse_and_guard()` — parse-error raw-text cap 2000 → 8000 chars.
-- `static/index.html` — client-side `_salvageWatch()` recovers complete watch items from truncated JSON; amber "AI response was cut off" banner; scrollable mono fallback card + Copy button for unparseable output.
-
-### 3. SGDS v3 component migration (`static/index.html` + `static/sgds-utility.css`)
-- Remaining hand-rolled controls replaced with SGDS web components 3.26.1 (CDN, pinned): `sgds-button`, `sgds-input`, `sgds-textarea`, `sgds-tab-group`/`sgds-tab`/`sgds-tab-panel`, `sgds-chip`, `sgds-card`, `sgds-alert`, `sgds-badge`, `sgds-spinner`. Layout shell, hash routing and all JS logic preserved; page CSS now only adds sizing/behavior.
-- **SGDS `:host` quirk (root cause of invisible-when-hidden alerts):** SGDS base component styles include `:host { display: block }`, which outranks the UA `[hidden] { display: none }` rule — the `hidden` attribute alone does NOT hide `sgds-alert`. Fix: page rule `sgds-alert[hidden] { display: none }` + JS toggles `hidden` and `show` together (`#ingest-alert`, `#brief-error`, `#brief-prose-head`).
-- `#ctx-lat`/`#ctx-lon` inputs 150px; refresh control uses a "Refresh" text label (not `↻`).
-- `static/sgds-utility.css`: local Tailwind build with SGDS theme alias tokens — the page depends on it (was untracked; now committed).
-
-### 4. Live-backend static-asset fix (`app.py`)
-- Backend served static files only under the `/static/` prefix while `index.html` (served at `/`) references assets root-relative (`/sgds-utility.css`) → 404 on the app; only the plain dev static server worked. Added a catch-all `StaticFiles(directory="static")` mount registered AFTER all routes — the page now renders identically from the backend.
-- Inline SVG data-URI favicon — kills the remaining `/favicon.ico` 404 in both deployments (no binary asset).
-
-### 5. Validation (Playwright harness `/tmp/sgds-verify/verify.mjs`, `VERIFY_BASE` overridable)
-- Static mode (`node verify.mjs`, port 8137): **17/17** pass, zero real 404s.
-- Live-ready mode (`VERIFY_BASE='http://127.0.0.1:5001/' node verify.mjs`): **16/17** — the single "fail" is the API-down assertion (expects Not ready/danger; with the backend up, the badge correctly shows Ready/success). `REAL_ERRORS []`, `CONSOLE_ERRORS []`.
-- Harness is mutation-tested (a hidden-rule regression is caught).
-
-### 6. Server restarted
-- New server on port 5001 (pid 22814, log `/tmp/cp_rag_server.log`) running the NEW code — brief fixes and catch-all static mount active. Startup ~2 min this time (vs the 6.14 min cold-start figure in Outstanding — worth re-checking at next restart). Brief cache cold after restart by design.
-
-### 7. SGDS UI reverted to pre-SGDS design (user request)
-- User reviewed the SGDS UI live and preferred the original look. Reverted: `git checkout ce43834 -- static/index.html` (the pre-SGDS single self-contained 1203-line file — blue `#1a56db` header, Brief/Chat/Library tabs, hand-rolled CSS/JS, no external assets) + `git rm static/sgds-utility.css` (existed only for the SGDS build).
-- Only SGDS-era carry-over kept: the inline SVG data-URI favicon (invisible; kills the `/favicon.ico` 404) — recolored its tile from `#2563eb` to the design blue `#1a56db` to match the header.
-- `app.py` untouched: the `@app.get("/")` `FileResponse` route takes precedence, so the catch-all `StaticFiles` mount from `f626a07` stays — harmless and future-proofs any root-relative asset.
-- Note: the "Clinical Flight Bag" tab rename was part of `f626a07` — re-applied at the user's request on top of the restored design (tab button text only; hash routing still uses `data-tab="chat"`). Re-validated 23/23 static + 25/25 live after the rename.
-- Validated with a fresh harness `/tmp/sgds-verify/verify_revert.mjs` (puppeteer-core; `VERIFY_BASE` overridable, `VERIFY_LIVE=1` for backend mode): **23/23** static-mode (incl. expected API-down degradation: Offline badge + brief-error banner, only-/api/ 404s) and **25/25** live on 5001 (Ready badge, 6 KPI tiles, real context chips, tab switching, zero 404s / console / page errors). Screenshots: `/tmp/sgds-verify/revert-*.png`.
-- The SGDS commit `f626a07` remains in git history if the design is ever wanted back.
+**Phase 9 — 2 km catchment + Active Ageing Programmes card, implemented +
+live-verified** (user request: the 90-day planning view now uses a 2 km
+radius, its title is layperson-friendly, and the dashboard gains an
+Active Ageing Programmes card for NTUC centres within 2 km):
+- `context/config.py`: `URA_NEAR_KM` 10 → **2.0** (the "near" band of the
+  URA planning view now = walkable catchment). New NTUC block:
+  `NTUC_CALENDAR_URL`, `NTUC_UA` (browser UA — ntuchealth.sg is
+  Akamai-fronted, non-browser UAs 403, same wall class as WIDB),
+  `NTUC_CACHE_TTL_SECONDS = 24 h`, `ACTIVE_AGING_NEAR_KM = 2.0`, and
+  `ACTIVE_AGING_CENTRES` — 27×(name, lat, lon) **verified live
+  2026-09-10** from ntuchealth.sg/active-ageing/locations (the Next.js
+  flight payload embeds per-centre `position`; no geocoding needed).
+  Names match the calendar-page anchor text exactly.
+- `context/community.py` (NEW, stdlib-only, key-free, mirrors ura.py):
+  fetches the calendar landing page, parses the
+  `assets.ntuchealth.sg/ae/<centre>-<Mon>-<YYYY>.pdf` anchors →
+  `[{name, month, pdf_url}]` (dedup by name), disk-cached 24 h at
+  `config.CACHE_DIR/ntuc_ageing_v1.json`. Payload carries `count`,
+  `calendar_months`, `caveat`; the caveat dynamically detects the known
+  NTUC site quirk where 'Bukit Batok West' reuses the Bedok-North PDF
+  (confirmed live 2026-09-10).
+- `context/snapshot.py`: new `active_ageing` block (fetched after the URA
+  block, `time.sleep(2)`); `_enrich_ageing()` adds `km` (1 dp, haversine
+  to the NTUC-published centre position — exact, unlike the URA
+  street-heuristic) + `near` (≤ 2 km) per centre and `near_count`; a
+  live centre missing from the config table renders without a km (still
+  listed, never `near`). Failure → `data_gaps: "active_ageing: ..."`,
+  never a crash.
+- `static/index.html`: Planning tile RENAMED `Planning 90d` →
+  **`New health facilities (3 mo)`** (value now "N approvals"), sub
+  "k near (~10 km)" → "k near (~2 km)"; NEW 6th tile **`Active Ageing
+  (2 km)`** (value "N centre(s)", sub = names + km within 2 km, or
+  "none within ~2 km"; warn tile on gap); NEW raw-context card
+  **`Active Ageing (NTUC Health, island-wide)`** — all centres
+  nearest-first, within-2 km bolded, each with a link to the current
+  month's calendar PDF + the caveat line; NEW chip "Active Ageing: N
+  within 2 km". Drive-by fix: the raw-context "Nearest polyclinics"
+  list read `nearest_services.pyclinics` (typo) and never rendered —
+  now `polyclinics`.
+- `context/prompts.py`: Local context gains an NTUC line — N centres
+  island-wide (calendar month), near ones named with km, "NON-clinical",
+  calendars answered from the Community resources corpus section, never
+  as clinical services. URA line "~10 km" → "~2 km".
+- `context/brief.py`: drive-by fix — `_project()` read
+  `ns.get("pyclinics")` (typo) so the brief prompt's polyclinics were
+  always `[]`; now `polyclinics`. AAP is deliberately NOT in the brief
+  projection (brief stays clinical; the system-prompt source whitelist
+  has no NTUC — see Outstanding).
+- `context/__main__.py`: PLANNING near-count "~10 km" → "~2 km"; new
+  AGEING CLI section (count, calendar month, all centres nearest-first,
+  `*within 2 km*` marked, unmapped flagged).
+- Docs: `docs/signal-research.md` §19; `CLAUDE.md` (6 tiles, AAP note).
+- Gates (all 0 paid credits; `node --check` on the page JS; py_compile
+  all touched modules; server restarted for live checks):
+  - Live unit check (one real NTUC fetch): 27 centres parsed, month
+    "Sep 2026", live-name set == config set (0 unmapped, 0 orphans);
+    near_count = 3 at the test clinic (Jurong Central Plaza 0.8,
+    Boon Lay 1.1, Taman Jurong 1.2 km); next-closest Gek Poh 2.2 and
+    Pioneer 2.3 km (correctly excluded from the 2 km band).
+  - Full `python -m context` build + `GET /api/context` live: see
+    /tmp/ctx_build_p9.log and docs/signal-research.md §19.
 
 ## Outstanding
-1. **Regenerate the brief — 1 paid call, user's call** — to confirm the truncation fix holds (max_tokens=4000) and the (restored) brief tiles/cards render real content.
-2. (carry-over) Upload progress indicator for `POST /api/ingest-pdf` (stretch).
-3. (carry-over) URA planning detail card: `decision_type` values not yet mapped to plain language.
-4. (carry-over) WIDB: per-region dengue case counts (weekly) missing from the fetch.
-5. (carry-over) CDA `disease_week` is a single national bulletin, not clinic-specific.
-6. (carry-over) No alerting/escalation tiers — signals surface only in brief/chat context.
-7. (carry-over) data.gov.sg is the sole external data source — no retry/circuit breaker; one 5xx degrades the snapshot until the 24 h TTL.
-8. (carry-over) Cold start was 6.14 min (reliability debt: ~4.6 min embedding 2,716 ACE chunks); this restart took ~2 min — re-check at next restart before concluding it's fixed.
-9. (carry-over) `context/` has no tests (stretch); 2,716-chunk ACE corpus completeness unverified (optional).
 
-Lower-priority carry-overs (unchanged): live PDF upload unexercised recently (`POST /api/ingest-pdf` verified in Phase 5); primarycarepages refresh needs a full `ingest()` rebuild (URL rewrite defeats append skip); postcode geocoding is district-centroid approx (OneMap DNS-blocked) — `--lat/--lon` exact; `rag.py` ingest dedupe is check-then-act with no lock (concurrent duplicates can double-embed — wasted credits, not corruption); 1 scanned ACE PDF uningested (rehab appendix, needs OCR); ACE repo drift check: `venv/bin/python scripts/ace_guidelines.py --list` (free), `--ingest` idempotent; k=12 retrieval heuristic — revisit as corpus grows; WIDB parse layout-fragile (3-day cache may serve stale parse — `python -m context --no-cache` force-refetches); catchment geocoding for per-clinic URA planning signals.
-
-
+1. **Uncommitted work (user's call — prior sessions deliberately left
+   commits to the user):** all Phase 7/8 files still uncommitted (HEAD =
+   origin/main = `33fe8f9`) PLUS Phase 9: `context/community.py`
+   (NEW/untracked) and re-touches of `context/config.py`,
+   `context/snapshot.py`, `context/prompts.py`, `context/brief.py`,
+   `context/__main__.py`, `static/index.html`, `CLAUDE.md`,
+   `docs/signal-research.md`, `HANDOFF.md`. Suggested commits so far:
+   `feat: runtime chat-model provider toggle (OpenRouter | local vLLM)`,
+   `fix: disable vLLM Qwen3 thinking mode for local provider`,
+   `feat: NTUC community calendars (Phase 7)`, `feat: URA planning zoom —
+   categories, street-area heuristic, polyclinic tile removed (Phase 8)`,
+   now `feat: 2 km catchment + Active Ageing card (Phase 9)`.
+2. **Provider does not survive restart**: runtime state is in-memory;
+   boot default is `openrouter`. Server restarted this session; if it
+   came back on `openrouter`, re-set local with `POST /api/provider`
+   (free, config-only) or pin `CHAT_PROVIDER=local` in `.env`.
+3. **AAP is dashboard/prompt-only, not in the clinician brief**: the
+   brief's source whitelist ("NEA | data.gov.sg | CDA WIDB | URA |
+   derived") has no NTUC and the projection omits `active_ageing`. If
+   the brief should mention nearby Active Ageing centres, add "NTUC" to
+   the whitelist + a small projection block (the data is already in the
+   snapshot).
+4. **Calendars track the published month** (Sep 2026 at write time).
+   NTUC updates the page around the start of each month; the next
+   `POST /api/community/refresh` pulls the new month and replaces the
+   old (no history retained — by design). The Phase 9 card reads the
+   SAME landing page, so it always reflects the published month.
+5. **URA street-hint coverage is partial by design** (19/50 listed rows
+   mapped at Phase 8 build time; the 2 km band is stricter, so expect
+   fewer near rows). Extend `config.STREET_AREA_HINTS` when a recurring
+   unmapped street matters.
+6. **NTUC centre table is static** (verified 2026-09-10). A new centre
+   appears in the card with "(no coordinates on file)" and no km — add
+   it to `config.ACTIVE_AGING_CENTRES` (positions are in the locations
+   page flight payload).
 
 ## Next-session prompt
-Project: CP_RAG at `/Users/ugeneo/Documents/Project Codes/CP_RAG` — a Singapore GP clinic's AI research assistant: FastAPI + LangChain RAG over primary-care chronic-care protocol pages, 96 ACG clinical-guideline PDFs (2,975 chunks, routed to the *Clinical guidelines* prompt section, never cited as protocol content), MOH public guidance, and live local-context signals (NEA air, DENGBURDEN dengue clusters, MOM heat, CDA `disease_week`, URA planning `catchment_change` — all key-free via the `context/` package), plus the Phase 6 clinician-brief dashboard with hash-routed Brief (default) / Clinical Flight Bag (chat) / Library tabs. LLM `deepseek/deepseek-v4-flash-0731` + `text-embedding-ada-002` via OpenRouter (`.env`, git-ignored — never commit). Golden rules in `CLAUDE.md`: credits are a budget (prefer `/api/status` over chat probes; one brief Generate = 1 paid call), Python 3.9, `chroma_db/` is expensive — don't rebuild. Read `CLAUDE.md` first; phase notes in `docs/signal-research.md` §9/§12–16.
 
-State (2026-09-10): All 2026-09-10 work committed + pushed: `ce43834` (fix: brief generation — max_tokens=4000, prose-tolerant JSON parse, raw cap 2000→8000) + `f626a07` (feat: SGDS v3 UI migration + static-asset serving) + `2c3ebc1` (revert: restore pre-SGDS UI at user's request) + `987d4fc` (feat: keep "Clinical Flight Bag" tab name); HEAD = origin/main. Server on port 5001 (pid 22814, log `/tmp/cp_rag_server.log`) is up — startup ~2 min. UI is the pre-SGDS original design (self-contained `static/index.html` restored from `ce43834`, blue `#1a56db` header) with two carried changes: the inline data-URI favicon (recolored `#1a56db`) and the "Clinical Flight Bag" tab name (label only; `data-tab="chat"` routing unchanged). `static/sgds-utility.css` deleted; the catch-all `StaticFiles` mount in `app.py` stays. Validated with `/tmp/sgds-verify/verify_revert.mjs` (`VERIFY_BASE` overridable, `VERIFY_LIVE=1` for backend): 23/23 static-mode, 25/25 live-ready-mode, zero 404s / console errors; live run renders the 6 KPI tiles + context chips from real data. The SGDS design remains in history at `f626a07` if ever wanted back. Test clinic: Lakeside Family Medicine Clinic, 518A Jurong West Street 52 (1.3454017, 103.7188383, PC 641518). Brief cache cold after restart by design; Generate = 1 paid call, user's call.
-
-Do next: 1) if the user approves the paid call, regenerate the brief to confirm the truncation fix holds and the brief tiles/cards render real content; 2) remaining backlog is the numbered Outstanding list above (brief regen, upload progress indicator, URA `decision_type` mapping, WIDB dengue case counts, cold-start re-check, …). Standing checks after any change: py_compile, `/api/health`, `/api/status`, `/api/context` (0 LLM credits), `/api/brief` (paid — do NOT generate unless asked).
+CP_RAG is a FastAPI RAG assistant for SG primary care (uvicorn,
+127.0.0.1:5001, log `/tmp/cp_rag_uvicorn.log`; startup ~2 min while the
+context snapshot builds). Corpus: 96 ACG guideline PDFs (~2,659 chunks;
+*Clinical guidelines* prompt section, never cited as protocol) +
+primarycarepages.sg protocol pages + MOH public guidance + **NTUC Health
+Active Ageing Centre programme calendars (26 centres, 386 chunks,
+`ntuchealth.sg` source site, `Community resources` prompt section —
+non-clinical, refreshed via `POST /api/community/refresh`, replace-only,
+idempotent, guarded)** in Chroma (`chroma_db/` — expensive, don't rebuild).
+Live local-context signals (NEA air, DENGBURDEN dengue, MOM heat, CDA
+disease_week, **URA planning — Phase 8: per-row `category`,
+`category_counts`, decision-date-window re-filter with `stale_dropped`,
+street-name `district`/`approx_km`/`distance_band`/`near_clinic_count`,
+cache `ura_planning_v2.json`; Phase 9: near band 10 → 2 km, tile renamed
+`New health facilities (3 mo)`**) via the key-free `context/` package;
+Phase 6 clinician-brief dashboard (Brief default: **6 KPI tiles — Nearest
+polyclinic tile removed 2026-09-10 (data kept in prompt + raw context),
+Active Ageing (2 km) tile added 2026-09-10** — / Clinical Flight Bag /
+Library). **NTUC Active Ageing: `context/community.py` (Phase 9) —
+calendar landing page, 24 h cache, 27-centre coordinate table in
+config, `active_ageing` snapshot block with km/near/near_count +
+raw-context card with per-centre calendar PDF links**; the same NTUC
+programmes are ALSO in the RAG corpus as `Community resources` (Phase 7,
+386 chunks). Embeddings: `BAAI/bge-m3` via `LOCAL_EMBEDDING_URL`
+(free), never switched by the provider toggle. CHAT LLM is
+runtime-switchable via header toggle: `openrouter` (DeepSeek, paid; boot
+default) or `local` (vLLM `comp9:gpu0-vllm`, Qwen3.8-27B-FP8 at
+`http://10.8.0.9:9001/v1` over WireGuard — `10.0.8.9` in old notes is a
+typo; free). Local calls disable Qwen3 thinking via
+`extra_body={"chat_template_kwargs":{"enable_thinking": false}}` in
+`rag.py make_chat_llm()` (`LOCAL_DISABLE_THINKING=0` re-enables).
+Retrieval: k=12 with `_steer_query()` protocol-name steering for the
+retriever only; community-intent questions skip steering
+(`_COMMUNITY_INTENT_RE`) so calendar chunks are not crowded out. Current
+state: HEAD = origin/main = `33fe8f9` with all Phase 7/8/9 work
+uncommitted (provider toggle + thinking fix + Phase 7 calendars +
+Phase 8 URA zoom + Phase 9 2 km band/Active Ageing card, all
+live-verified; `context/community.py` untracked); server restarted
+this session (provider may be back on `openrouter`); URA v2 cache and
+`ntuc_ageing_v1.json` hold real fetches (2026-09-10). Do next: review
+the uncommitted diff and commit it (user's call; suggested commits
+above), then optionally pin `CHAT_PROVIDER` in `.env`. Golden rules in
+`CLAUDE.md` (read it first).

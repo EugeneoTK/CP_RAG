@@ -8,7 +8,7 @@ it lands in data_gaps so the snapshot is always emitted.
 import datetime
 import time
 
-from . import config, fetchers, ura, widb
+from . import community, config, fetchers, ura, widb
 from .geo import haversine_km, point_in_polygon
 from .linkage import PROTOCOLS, build_protocol_links
 
@@ -63,6 +63,57 @@ def _nearest_polyclinics(lat, lon):
         })
     out.sort(key=lambda x: x["km"])
     return out[:3], None
+
+
+def _area_for_address(address):
+    """Street-name heuristic -> (label, lat, lon) or None. First hint whose
+    token appears in the uppercase address wins. Coarse — see
+    config.STREET_AREA_HINTS docstring."""
+    a = (address or "").upper()
+    for token, label, lat, lon in config.STREET_AREA_HINTS:
+        if token in a:
+            return label, lat, lon
+    return None
+
+
+def _enrich_ura(cc, lat, lon):
+    """Phase 8: add district / approx_km / distance_band to each listed
+    decision (distance to the AREA centroid — rough, documented) and set
+    cc["near_clinic_count"]. Mutates and returns cc."""
+    near = 0
+    for a in cc.get("healthcare_decisions_90d") or []:
+        hit = _area_for_address(a.get("address"))
+        if not hit:
+            continue
+        label, alat, alon = hit
+        km = round(haversine_km(lat, lon, alat, alon), 1)
+        a["district"] = label
+        a["approx_km"] = km
+        a["distance_band"] = ("near" if km <= config.URA_NEAR_KM
+                              else "mid" if km <= 25 else "far")
+        if km <= config.URA_NEAR_KM:
+            near += 1
+    cc["near_clinic_count"] = near
+    return cc
+
+
+def _enrich_ageing(ac, lat, lon):
+    """Phase 9: add `km` + `near` per centre (coords from
+    config.ACTIVE_AGING_CENTRES; a live centre missing from that table keeps
+    no km and is not `near`). Mutates and returns ac."""
+    coords = dict((n, (la, lo)) for n, la, lo in config.ACTIVE_AGING_CENTRES)
+    near = 0
+    for c in ac.get("centres") or []:
+        hit = coords.get(c.get("name"))
+        if not hit:
+            continue
+        km = round(haversine_km(lat, lon, hit[0], hit[1]), 1)
+        c["km"] = km
+        c["near"] = km <= config.ACTIVE_AGING_NEAR_KM
+        if c["near"]:
+            near += 1
+    ac["near_count"] = near
+    return ac
 
 
 def build_snapshot(lat, lon, name, use_cache=True):
@@ -188,7 +239,15 @@ def build_snapshot(lat, lon, name, use_cache=True):
     if cc_err:
         gaps.append("ura: %s" % cc_err)
     else:
-        snap["catchment_change"] = cc
+        snap["catchment_change"] = _enrich_ura(cc, lat, lon)
+
+    # --- NTUC Active Ageing centres (community referral, Phase 9) -----------------------
+    time.sleep(2)
+    ac, ac_err = community.fetch_centres(use_cache)
+    if ac_err:
+        gaps.append("active_ageing: %s" % ac_err)
+    else:
+        snap["active_ageing"] = _enrich_ageing(ac, lat, lon)
 
     # --- nearest polyclines (service availability) -------------------------------------
     pcs, err = _nearest_polyclinics(lat, lon)

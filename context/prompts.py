@@ -52,9 +52,10 @@ def format_live_context(snapshot):
         line += "; ".join(dw.get("notable") or ["table parsed, no narrative fields"])
         local_lines = signal_lines + [line]
 
-    # URA (Phase 4): island-wide planning-decision signal — baseline context,
+    # URA (Phase 4/8): island-wide planning-decision signal — baseline context,
     # same treatment as WIDB; a written permission is explicitly NOT an
-    # opened facility, so the line says so.
+    # opened facility, so the line says so. Phase 8 adds the category split
+    # and the (rough) near-clinic count.
     cc = snapshot.get("catchment_change") or {}
     if cc.get("healthcare_decisions_90d_count"):
         examples = "; ".join(
@@ -63,13 +64,39 @@ def format_live_context(snapshot):
                 (a.get("what") or "?")[:80],
                 (" [" + a["decision_type"] + "]") if a.get("decision_type") else "")
             for a in (cc.get("healthcare_decisions_90d") or [])[:3])
+        k = cc.get("category_counts") or {}
+        bits = ", ".join("%d %s" % (k[c], c.lower())
+                         for c in ("Senior care", "Nursing home", "Child care",
+                                   "Polyclinic", "Clinic", "Medical", "Other")
+                         if k.get(c))
+        extra = (" (%s)" % bits) if bits else ""
+        if cc.get("near_clinic_count"):
+            extra += ", %d within ~2 km of the clinic" % cc["near_clinic_count"]
         local_lines = local_lines + [
             "- URA planning decisions %s (island-wide written permissions, "
-            "NOT protocol content): %d healthcare-related, e.g. %s. A written "
+            "NOT protocol content): %d healthcare-related%s, e.g. %s. A written "
             "permission is NOT an opened facility — never present one as an "
             "existing service." % (
                 cc.get("window") or "last 90 days",
-                cc["healthcare_decisions_90d_count"], examples)]
+                cc["healthcare_decisions_90d_count"], extra, examples)]
+
+    # NTUC Active Ageing (Phase 9): community (NON-clinical) referral signal —
+    # baseline context like WIDB/URA; the monthly programme calendars are
+    # answered from the Community resources corpus section.
+    aa = snapshot.get("active_ageing") or {}
+    if aa.get("count"):
+        near = [c for c in (aa.get("centres") or []) if c.get("near")]
+        names = ", ".join("%s (%.1f km)" % (c["name"], c["km"]) for c in near)
+        local_lines = local_lines + [
+            "- NTUC Health Active Ageing Centres (community exercise/social/"
+            "digital-skills programmes for older adults — NON-clinical): %d "
+            "island-wide (calendar month: %s); within ~2 km of the clinic: %s. "
+            "Their monthly programme calendars are in the Community resources "
+            "corpus section — use that to answer questions about nearby "
+            "activities; never present them as clinical services." % (
+                aa.get("count", 0),
+                ", ".join(aa.get("calendar_months") or []) or "?",
+                names or "none")]
     local = (
         "Live population-level signals (NEA / data.gov.sg / CDA) — observations "
         "about the area right now, NOT protocol content; never present them "

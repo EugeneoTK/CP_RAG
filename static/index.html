@@ -33,8 +33,40 @@
     header h1 { font-size: 1.1rem; font-weight: 600; }
     header p { font-size: 0.8rem; opacity: 0.8; }
 
-    #status-badge {
+    #provider-switch {
       margin-left: auto;
+      display: flex;
+      border: 1px solid rgba(255,255,255,0.4);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    #provider-switch .prov-btn {
+      padding: 5px 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background: transparent;
+      color: rgba(255,255,255,0.8);
+      border: none;
+      border-radius: 0;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #provider-switch .prov-btn + .prov-btn {
+      border-left: 1px solid rgba(255,255,255,0.4);
+    }
+    #provider-switch .prov-btn:hover:not(:disabled) {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+    #provider-switch .prov-btn.on {
+      background: #fff;
+      color: #1a56db;
+      font-weight: 600;
+    }
+    #provider-switch .prov-btn:disabled { opacity: 0.6; cursor: wait; }
+
+    #status-badge {
+      margin-left: 10px;
       font-size: 0.75rem;
       padding: 4px 10px;
       border-radius: 999px;
@@ -198,6 +230,18 @@
     #pdf-bar label.pdf-btn:hover { background: #0284c7; }
     #pdf-status { color: #0369a1; }
     #pdf-count { margin-left: auto; color: #64748b; font-size: 0.75rem; }
+
+    /* --- Phase 7: community resources bar (non-clinical) --------------------- */
+    #community-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 0 0 10px; padding: 7px 12px; border-radius: 10px;
+      background: #f0fdf4; border: 1px solid #bbf7d0; font-size: 0.82rem; }
+    #community-bar .pdf-label { font-weight: 600; color: #166534; }
+    #community-bar button.pdf-btn { cursor: pointer; padding: 4px 10px; border-radius: 8px;
+      border: none; background: #16a34a; color: #fff; font-weight: 600; font-size: 0.8rem; }
+    #community-bar button.pdf-btn:hover:not(:disabled) { background: #15803d; }
+    #community-bar button.pdf-btn:disabled { background: #94a3b8; cursor: default; }
+    #community-status { color: #15803d; }
+    #community-meta { margin-left: auto; color: #64748b; font-size: 0.75rem; }
 
     .empty-state {
       flex: 1;
@@ -427,6 +471,10 @@
     <h1>Care Protocol Assistant</h1>
     <p>Powered by HSG Primary Care Pages</p>
   </div>
+  <div id="provider-switch" title="Chat model: OpenRouter (cloud) or the local vLLM server. Embeddings always use OpenRouter — they must match the stored index.">
+    <button class="prov-btn" data-provider="openrouter" onclick="switchProvider('openrouter')">OpenRouter</button>
+    <button class="prov-btn" data-provider="local" onclick="switchProvider('local')">Local LLM</button>
+  </div>
   <span id="status-badge">Checking...</span>
 </header>
 
@@ -498,6 +546,12 @@
     </div>
   </section>
   <section id="view-library" hidden>
+    <div id="community-bar">
+      <span class="pdf-label">Community resources</span>
+      <button class="pdf-btn" id="community-refresh-btn" onclick="refreshCommunity()">Refresh calendars</button>
+      <span id="community-status"></span>
+      <span id="community-meta"></span>
+    </div>
     <div id="pdf-bar">
       <span class="pdf-label">Clinical guidelines</span>
       <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
@@ -517,6 +571,8 @@
   const ingestBar = document.getElementById('ingest-bar');
   const emptyState = document.getElementById('empty-state');
   const ingestBtn = document.getElementById('ingest-btn');
+  const providerSwitch = document.getElementById('provider-switch');
+  const PROVIDER_KEY = 'cp-rag-provider';
 
   async function checkStatus() {
     try {
@@ -538,6 +594,49 @@
     } catch {
       statusBadge.textContent = 'Offline';
       statusBadge.className = 'not-ready';
+    }
+  }
+
+  function setProviderUI(id) {
+    providerSwitch.querySelectorAll('.prov-btn').forEach(b =>
+      b.classList.toggle('on', b.dataset.provider === id));
+  }
+
+  async function loadProvider() {
+    let current = null;
+    try {
+      const res = await fetch('/api/provider');
+      current = (await res.json()).current;
+    } catch { return; }  // server not up yet — next status poll re-runs nothing;
+                         // the toggle still works once the server answers
+    setProviderUI(current);
+    try {
+      const saved = localStorage.getItem(PROVIDER_KEY);
+      if (saved && saved !== current) await switchProvider(saved);
+    } catch { /* private mode — server default stays */ }
+  }
+
+  async function switchProvider(id) {
+    const btn = providerSwitch.querySelector('.prov-btn[data-provider="' + id + '"]');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert('Provider switch failed: ' + (d.detail || 'HTTP ' + res.status));
+        return;
+      }
+      try { localStorage.setItem(PROVIDER_KEY, id); } catch { /* private mode */ }
+      setProviderUI(id);
+    } catch (e) {
+      alert('Provider switch failed: ' + (e.message || 'network error'));
+    } finally {
+      btn.disabled = false;
     }
   }
 
@@ -665,6 +764,37 @@
   }
   refreshPdfs();
 
+  // --- Phase 7: community calendar refresh (user-triggered, monthly) ------------
+  async function refreshCommunity() {
+    const btn = document.getElementById('community-refresh-btn');
+    const st = document.getElementById('community-status');
+    btn.disabled = true;
+    st.textContent = 'Refreshing... (fetching centre PDFs + embedding)';
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      st.textContent = 'Refreshing... ' + Math.floor((Date.now() - t0) / 1000) + 's';
+    }, 1000);
+    try {
+      const res = await fetch('/api/community/refresh', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.detail || ('HTTP ' + res.status));
+      if (d.status === 'up-to-date') {
+        st.textContent = 'Up to date — ' + (d.centres || 0) + ' centres unchanged.';
+      } else {
+        st.textContent = 'Refreshed: ' + (d.chunks_added || 0) + ' chunks added, '
+          + (d.chunks_removed || 0) + ' removed (' + (d.centres || 0) + ' centres'
+          + (d.calendar_months && d.calendar_months.length ? ', ' + d.calendar_months.join('/') : '')
+          + (d.failed && d.failed.length ? ', ' + d.failed.length + ' failed' : '') + ')';
+      }
+      loadLibrary();
+    } catch (e) {
+      st.textContent = 'Refresh failed: ' + (e.message || e);
+    } finally {
+      clearInterval(timer);
+      btn.disabled = false;
+    }
+  }
+
   // --- Phase 6: library ------------------------------------------------------
   let lastLibrary = null;
   async function loadLibrary() {
@@ -684,10 +814,12 @@
   function renderLibrary(d) {
     const el = document.getElementById('library');
     const t = d.totals || {};
-    const docs = (t.guideline_pdfs || 0) + (t.protocol_pages || 0) + (t.public_guidance_pages || 0);
+    const docs = (t.guideline_pdfs || 0) + (t.protocol_pages || 0) + (t.public_guidance_pages || 0)
+      + (t.community_centres || 0);
     let html = '<div id="lib-totals">' + t.chunks + ' chunks · ' + docs + ' documents: '
       + (t.guideline_pdfs || 0) + ' guideline PDFs · ' + (t.protocol_pages || 0)
-      + ' protocol pages · ' + (t.public_guidance_pages || 0) + ' guidance pages</div>';
+      + ' protocol pages · ' + (t.public_guidance_pages || 0) + ' guidance pages · '
+      + (t.community_centres || 0) + ' community calendars</div>';
 
     html += '<h3 class="lib-h">Clinical guideline PDFs</h3><div class="pdf-grid">';
     html += (d.pdfs || []).map(p => {
@@ -724,6 +856,31 @@
     html += webSec('Care-protocol pages (primarycarepages.sg)',
       proto.length ? proto : null, pcs.length - proto.length);
     html += webSec('Public health guidance (moh.gov.sg)', ws['moh.gov.sg']);
+
+    // --- Community resources (ntuchealth.sg) — monthly refresh above ---------
+    const com = d.community || {};
+    const comRows = com.centres || [];
+    html += '<h3 class="lib-h">Community resources (ntuchealth.sg)</h3>';
+    if (comRows.length) {
+      const curMonth = new Date().toISOString().slice(0, 7);
+      const months = com.months || [];
+      const stale = months.length && months[months.length - 1] < curMonth;
+      html += '<div class="lib-card"><div class="s">'
+        + comRows.length + ' centres · ' + months.join(', ')
+        + ' · ' + comRows.reduce((n, r) => n + (r.chunks || 0), 0) + ' chunks'
+        + (stale ? ' · <span style="color:#b45309">new month available — refresh above</span>' : '')
+        + '</div></div>'
+        + comRows.map(r => '<div class="lib-row"><span class="f">' + escapeHtml(r.title || '')
+          + '</span> <a class="s" href="' + escapeHtml(r.source) + '" target="_blank" rel="noopener">'
+          + escapeHtml(r.source) + '</a> <span class="s dim">' + r.chunks + ' chunks</span></div>').join('');
+      const meta = document.getElementById('community-meta');
+      if (meta) {
+        meta.textContent = comRows.length + ' centres · ' + months.join(', ')
+          + (com.refreshed_at ? ' · refreshed ' + new Date(com.refreshed_at).toLocaleString() : '');
+      }
+    } else {
+      html += '<div class="s dim">none in corpus — use "Refresh calendars" above</div>';
+    }
     el.innerHTML = html;
   }
 
@@ -839,6 +996,9 @@
     const cc = snap.catchment_change || {};
     if (cc.healthcare_decisions_90d_count != null)
       chips.push(chipHtml('URA 90d', cc.healthcare_decisions_90d_count + ' healthcare-related', 'info'));
+    const agc = snap.active_ageing || {};
+    if (agc.near_count != null)
+      chips.push(chipHtml('Active Ageing', agc.near_count + ' within 2 km', 'info'));
     if (active.length) chips.push(chipHtml('Protocols', active.length + ' linked', 'info'));
     else chips.push(chipHtml('Signals', 'none elevated', 'good'));
     if ((snap.data_gaps || []).length) chips.push(chipHtml('Gaps', String(snap.data_gaps.length), 'warn'));
@@ -911,22 +1071,39 @@
 
     let uraHtml = '<h3>Planning decisions (URA, island-wide)</h3>';
     if (cc.healthcare_decisions_90d_count != null) {
-      uraHtml += `<div class="row dim">${escapeHtml(cc.window || '')} — ${cc.rows_scanned != null ? cc.rows_scanned : '?'} written permissions scanned</div>`;
+      uraHtml += `<div class="row dim">${escapeHtml(cc.window || '')} — ${cc.rows_scanned != null ? cc.rows_scanned : '?'} written permissions scanned · district = street-name heuristic (coarse)</div>`;
       const hcd = cc.healthcare_decisions_90d || [];
-      uraHtml += hcd.length
-        ? hcd.map(a => `<div class="row">• ${escapeHtml(a.date || '?')}: ${escapeHtml(a.address || '?')} — ${escapeHtml((a.what || '?').slice(0, 90))}${a.decision_type ? ' <span class="dim">[' + escapeHtml(a.decision_type) + ']</span>' : ''}</div>`).join('')
-        : '<div class="row dim">• no healthcare-related decisions in window</div>';
+      if (hcd.length) {
+        const order = ['Senior care', 'Nursing home', 'Child care', 'Polyclinic', 'Clinic', 'Medical', 'Other'];
+        for (const cat of order) {
+          const grp = hcd.filter(a => (a.category || 'Other') === cat);
+          if (!grp.length) continue;
+          uraHtml += `<div class="row" style="font-weight:600">${cat} (${grp.length})</div>`;
+          uraHtml += grp.map(a =>
+            `<div class="row">• ${escapeHtml(a.date || '?')}: ${escapeHtml(a.address || '?')}${a.district ? ' <span class="dim">[' + escapeHtml(a.district) + ' · ~' + a.approx_km + ' km]</span>' : ''} — ${escapeHtml((a.what || '?').slice(0, 90))}${a.decision_type ? ' <span class="dim">[' + escapeHtml(a.decision_type) + ']</span>' : ''}</div>`).join('');
+        }
+      } else uraHtml += '<div class="row dim">• no healthcare-related decisions in window</div>';
       uraHtml += `<div class="row dim">${escapeHtml(cc.caveat || 'planning permission ≠ opened facility')}</div>`;
     } else uraHtml += '<div class="row dim">unavailable (see data gaps)</div>';
+
+    let agHtml = '<h3>Active Ageing (NTUC Health, island-wide)</h3>';
+    if (agc.count != null) {
+      agHtml += `<div class="row dim">Community (NON-clinical) exercise / social / digital-skills programmes for older adults · calendar month ${escapeHtml((agc.calendar_months || []).join(', ') || '?')} · distances: clinic point → NTUC-published centre coordinates</div>`;
+      const agList = (agc.centres || []).slice().sort((a, b) => (a.km == null ? 9999 : a.km) - (b.km == null ? 9999 : b.km));
+      agHtml += agList.map(x => x.km == null
+        ? `<div class="row dim">• ${escapeHtml(x.name)} <span class="dim">(no coordinates on file)</span></div>`
+        : `<div class="row${x.near ? '' : ' dim'}">${x.near ? '<strong>' : ''}• ${escapeHtml(x.name)}${x.near ? '</strong>' : ''} — ${x.km} km${x.near ? ' (within 2 km)' : ''}${x.pdf_url ? ' · <a href="' + escapeHtml(x.pdf_url) + '" target="_blank" rel="noopener">calendar PDF</a>' : ''}</div>`).join('');
+      agHtml += `<div class="row dim">${escapeHtml(agc.caveat || '')}</div>`;
+    } else agHtml += '<div class="row dim">unavailable (see data gaps)</div>';
 
     let miscHtml = '<h3>Data quality</h3>';
     const gaps = snap.data_gaps || [];
     miscHtml += gaps.length
       ? '<div class="ctx-gaps">' + gaps.map(g => `<div class="row">• ${escapeHtml(g)}</div>`).join('') + '</div>'
       : '<div class="row ctx-ok">All sources OK — no data gaps.</div>';
-    if (snap.nearest_services && (snap.nearest_services.pyclinics || []).length) {
+    if (snap.nearest_services && (snap.nearest_services.polyclinics || []).length) {
       miscHtml += '<h3 style="margin-top:8px">Nearest polyclinics</h3>' +
-        snap.nearest_services.pyclinics.map(p =>
+        snap.nearest_services.polyclinics.map(p =>
           `<div class="row">• ${escapeHtml(p.name || '')} (${escapeHtml(p.postcode || '')}) — ${p.km} km</div>`).join('');
     }
     miscHtml += `<div class="row dim" style="margin-top:6px">Clinic: ${escapeHtml(c.name || '')} · NEA region ~${escapeHtml(c.nea_region_approx || '?')}${c.town ? ' · town ~' + escapeHtml(c.town) : ''}</div>`;
@@ -963,6 +1140,7 @@
       + `<div class="ctx-card">${dengueHtml}</div>`
       + `<div class="ctx-card">${widbHtml}</div>`
       + `<div class="ctx-card">${uraHtml}</div>`
+      + `<div class="ctx-card">${agHtml}</div>`
       + `<div class="ctx-card">${miscHtml}</div>`;
     renderBriefTiles(snap);
     renderSpotlight(snap);
@@ -979,7 +1157,7 @@
     const el = document.getElementById('brief-tiles');
     const c = (snap.meta || {}).clinic || {};
     const aq = snap.air_quality || {}, w = snap.weather || {}, d = snap.dengue || {};
-    const dw = snap.disease_week || {}, cc = snap.catchment_change || {}, ns = snap.nearest_services || {};
+    const dw = snap.disease_week || {}, cc = snap.catchment_change || {};
     if (c.name) document.getElementById('brief-title').textContent = 'Brief — ' + c.name;
     const gap = g => gapFor(snap, g);
     let tiles = '';
@@ -1030,19 +1208,39 @@
         + (flu != null ? ' · flu ILI ' + flu + '%' : '');
       tiles += tileHtml('WIDB week', cls, dwD.week + ' dengue cases', escapeHtml(sub));
     } else tiles += tileHtml('WIDB week', '', 'no signal', 'bulletin unavailable');
-    // Planning 90d — informational; sub-line: permission ≠ opened facility
+    // New health facilities (3 mo) — URA written permissions, island-wide;
+    // layperson title (was "Planning 90d"). Sub: category breakdown + near
+    // count ("~2 km" = config.URA_NEAR_KM; district heuristic is rough)
     const pGap = gap(['ura']);
-    if (pGap) tiles += tileHtml('Planning 90d', 'warn', 'unavailable', escapeHtml(pGap));
-    else if (cc.healthcare_decisions_90d_count != null)
-      tiles += tileHtml('Planning 90d', '', cc.healthcare_decisions_90d_count + ' decisions',
-        'permission ≠ opened facility');
-    else tiles += tileHtml('Planning 90d', '', 'no signal', 'URA unavailable');
-    // Nearest polyclinic — neutral: name + km
-    const nGap = gap(['polyclinics']);
-    const py = (ns.pyclinics || [])[0];
-    if (nGap) tiles += tileHtml('Nearest polyclinic', 'warn', 'unavailable', escapeHtml(nGap));
-    else if (py) tiles += tileHtml('Nearest polyclinic', '', py.km + ' km', escapeHtml(py.name || ''));
-    else tiles += tileHtml('Nearest polyclinic', '', 'no data', '');
+    if (pGap) tiles += tileHtml('New health facilities (3 mo)', 'warn', 'unavailable', escapeHtml(pGap));
+    else if (cc.healthcare_decisions_90d_count != null) {
+      const k = cc.category_counts || {};
+      const bits = [];
+      if (k['Senior care']) bits.push(k['Senior care'] + ' senior care');
+      if (k['Nursing home']) bits.push(k['Nursing home'] + ' nursing home');
+      if (k['Child care']) bits.push(k['Child care'] + ' child care');
+      const cm = (k['Clinic'] || 0) + (k['Medical'] || 0) + (k['Other'] || 0);
+      if (cm) bits.push(cm + ' clinic/medical');
+      if (k['Polyclinic']) bits.push(k['Polyclinic'] + ' polyclinic');
+      const near = cc.near_clinic_count ? cc.near_clinic_count + ' near (~2 km) · ' : '';
+      tiles += tileHtml('New health facilities (3 mo)', '', cc.healthcare_decisions_90d_count + ' approvals',
+        near + (bits.join(' · ') || 'permission ≠ opened facility'));
+    } else tiles += tileHtml('New health facilities (3 mo)', '', 'no signal', 'URA unavailable');
+    // Active Ageing (2 km) — NTUC centres within the walkable catchment
+    // (community, NON-clinical; monthly calendars in the Community corpus)
+    const agGap = gap(['active_ageing']);
+    const ag = snap.active_ageing || {};
+    if (agGap) tiles += tileHtml('Active Ageing (2 km)', 'warn', 'unavailable', escapeHtml(agGap));
+    else if (ag.count != null) {
+      const agNear = (ag.centres || []).filter(c => c.near);
+      tiles += tileHtml('Active Ageing (2 km)', '', agNear.length + ' centre' + (agNear.length === 1 ? '' : 's'),
+        agNear.length
+          ? agNear.map(c => c.name + ' (' + c.km + ' km)').join(' · ')
+          : 'none within ~2 km');
+    } else tiles += tileHtml('Active Ageing (2 km)', '', 'no signal', 'NTUC unavailable');
+    // Nearest polyclinic tile removed 2026-09-10 (Phase 8): static data, no
+    // signal. The data stays in the RAG prompt (Local context) and the
+    // "Nearest polyclinics" list in the raw-context drill-down below.
     el.innerHTML = tiles;
   }
 
@@ -1195,12 +1393,16 @@
   }
 
   checkStatus();
+  loadProvider();
   refreshContext();
   applyTab(currentTab());
   setInterval(refreshContext, CTX_REFRESH_MS);
   // Re-poll status while not ready (e.g. server restarted mid-session):
   // without this, a failed first probe leaves the send button disabled.
-  setInterval(() => { if (statusBadge.className !== 'ready') checkStatus(); }, 10000);
+  // loadProvider() re-syncs the toggle the same way (idempotent, key-free).
+  setInterval(() => {
+    if (statusBadge.className !== 'ready') { checkStatus(); loadProvider(); }
+  }, 10000);
 </script>
 </body>
 </html>
