@@ -549,7 +549,14 @@ def _parse_brief(text):
         if body.rstrip().endswith("```"):
             body = body.rstrip()[:-3]
         t = body.strip()
-    data = json.loads(t)
+    try:
+        data = json.loads(t)
+    except ValueError:
+        # Tolerate prose around the JSON (e.g. "Here is the brief: {...}").
+        s, e = t.find("{"), t.rfind("}")
+        if s == -1 or e <= s:
+            raise
+        data = json.loads(t[s:e + 1])
     if not isinstance(data, dict):
         raise ValueError("brief is not a JSON object")
     items = []
@@ -570,7 +577,7 @@ def _parse_and_guard(text):
     try:
         brief = _parse_brief(text)
     except ValueError:
-        return {"parse_error": True, "raw": (text or "")[:2000],
+        return {"parse_error": True, "raw": (text or "")[:8000],
                 "headline": "", "watch": [], "outlook": "",
                 "provenance_drops": 0}
     watch, drops = _apply_provenance_guard(brief["watch"])
@@ -585,8 +592,10 @@ def generate_brief(system, user):
     Cost: ONE LLM call — ≤2 provider round-trips (max_retries=1), 0
     embedding calls, 0 retrieval.
     """
+    # Explicit max_tokens: the default cap cut the brief JSON mid-string,
+    # which is what most often trips the parse fallback.
     llm = ChatOpenAI(model_name=CHAT_MODEL, openai_api_base=OPENAI_BASE_URL,
-                     temperature=0, timeout=300, max_retries=1)
+                     temperature=0, timeout=300, max_retries=1, max_tokens=4000)
     resp = llm.invoke([("system", system), ("human", user)])
     text = resp if isinstance(resp, str) else str(getattr(resp, "content", resp))
     return _parse_and_guard(text)
