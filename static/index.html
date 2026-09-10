@@ -1,526 +1,1206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CP RAG - Care Protocol Assistant</title>
-<!-- Inline SVG favicon (data URI): avoids a /favicon.ico 404 in both the
-     backend-served and plain-static deployments — no binary asset needed. -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Ctext x='16' y='21.5' font-family='Inter,Arial,sans-serif' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3ECP%3C/text%3E%3C/svg%3E" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CP RAG - Care Protocol Assistant</title>
+  <!-- Inline SVG favicon (data URI): avoids a /favicon.ico 404 in both the
+       backend-served and plain-static deployments — no binary asset needed. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a56db'/%3E%3Ctext x='16' y='21.5' font-family='Inter,Arial,sans-serif' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3ECP%3C/text%3E%3C/svg%3E" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-<!-- ===== SGDS v3 setup (CDN, pinned to 3.26.1) =====
-     Order: FOUC guard → design tokens (day theme, imports root.css)
-     → reboot + grid → compiled SGDS utilities → app styles. -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@govtechsg/sgds-web-component@3.26.1/css/fouc.css" />
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@govtechsg/sgds-web-component@3.26.1/themes/day.css" />
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@govtechsg/sgds-web-component@3.26.1/css/sgds.css" />
-<link rel="stylesheet" href="/sgds-utility.css" />
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f4f8;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
 
-<!-- SGDS brand font -->
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    header {
+      width: 100%;
+      background: #1a56db;
+      color: #fff;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
 
-<!-- SGDS v3 web components: scoped custom element registry polyfill,
-     then the component bundle (registers all sgds-* elements). -->
-<script src="https://cdn.jsdelivr.net/npm/@webcomponents/scoped-custom-element-registry"></script>
-<script src="https://cdn.jsdelivr.net/npm/@govtechsg/sgds-web-component@3.26.1"></script>
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    header p { font-size: 0.8rem; opacity: 0.8; }
 
-<style>
-/* ============================================================
-   CP RAG — app shell & bespoke content styles.
-   Foundations (typography, colour, radii, elevation) come from
-   SGDS v3 tokens (themes/day.css + css/sgds.css). Form controls,
-   buttons, alerts, tabs and the status badge are SGDS web
-   components; structural layout uses compiled SGDS `sgds:`
-   utilities (sgds-utility.css).
-   ============================================================ */
+    #status-badge {
+      margin-left: auto;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 500;
+      background: rgba(255,255,255,0.15);
+    }
+    #status-badge.ready { background: #16a34a; }
+    #status-badge.not-ready { background: #dc2626; }
 
-:root {
-  /* SGDS brand theming — blue product primary (app accent) */
-  --sgds-product-primary-100: var(--sgds-blue-100);
-  --sgds-product-primary-200: var(--sgds-blue-200);
-  --sgds-product-primary-300: var(--sgds-blue-300);
-  --sgds-product-primary-400: var(--sgds-blue-400);
-  --sgds-product-primary-500: var(--sgds-blue-500);
-  --sgds-product-primary-600: var(--sgds-blue-600);
-  --sgds-product-primary-700: var(--sgds-blue-700);
-  --sgds-product-primary-800: var(--sgds-blue-800);
-  --sgds-product-primary-900: var(--sgds-blue-900);
+    main {
+      width: 100%;
+      max-width: 800px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0 16px;
+    }
 
-  /* App aliases mapped onto SGDS semantic tokens */
-  --primary: var(--sgds-product-primary-500);
-  --primary-dark: var(--sgds-product-primary-600);
-  --border: var(--sgds-border-color-muted);
-  --text: var(--sgds-color-default);
-  --text-2: var(--sgds-color-subtle);
-  --muted: var(--sgds-gray-500);
-  --surface: var(--sgds-surface-default);
-  --radius: var(--sgds-border-radius-xl);
-  --shadow: var(--sgds-elevation-surface-2);
-}
+    #chat-window {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
 
-body {
-  background: var(--sgds-bg-alternate);
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      line-height: 1.55;
+      font-size: 0.9rem;
+      word-wrap: break-word;
+      white-space: pre-wrap; /* answers are plain text — keep the model's line breaks */
+    }
 
-/* ============ header ============ */
-header {
-  width: 100%;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 10px 24px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+    .msg.user {
+      align-self: flex-end;
+      background: #1a56db;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
 
-.logo {
-  width: 32px; height: 32px;
-  border-radius: var(--sgds-border-radius-md);
-  background: linear-gradient(135deg, var(--sgds-product-primary-500), var(--sgds-product-primary-800));
-  color: #fff;
-  font-size: 1.1rem; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  flex: none;
-}
+    .msg.bot {
+      align-self: flex-start;
+      background: #fff;
+      color: #1e293b;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
 
-header h1 { font-size: 1rem; font-weight: 700; color: var(--text); }
-header p { font-size: 0.72rem; color: var(--text-2); margin-top: 1px; }
+    .msg.bot .sources {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 0.78rem;
+      color: #64748b;
+    }
 
-/* ============ main column / SGDS tabs ============ */
-main {
-  width: 100%;
-  max-width: 880px;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 0 16px;
-}
+    .msg.bot .sources a {
+      display: block;
+      color: #1a56db;
+      text-decoration: none;
+      word-break: break-all;
+      margin-top: 2px;
+    }
 
-/* The tab group's shadow root is stretched as a single grid item
-   (grid-template-rows: 1fr); the active panel then fills it and
-   becomes a flex column so the chat window can scroll internally. */
-sgds-input, sgds-textarea { display: block; }
-/* SGDS base styles set :host{display:block} in each component's shadow
-   CSS, which outranks the UA [hidden] rule, so the hidden attribute
-   alone does not hide an sgds-alert host. Restore it here. */
-sgds-alert[hidden] { display: none; }
-sgds-tab-group { flex: 1; min-height: 0; display: grid; grid-template-rows: 1fr; }
-sgds-tab-panel { display: none; }
-sgds-tab-panel[active] { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-sgds-tab-panel[name="brief"],
-sgds-tab-panel[name="library"] { overflow-y: auto; }
+    .msg.bot .sources a:hover { text-decoration: underline; }
 
-/* Context input fields (SGDS inputs enforce a 160px min-width, so
-   size them via width + the input min-width custom property). */
-#ctx-pc { width: 130px; --input-min-width: 130px; }
-#ctx-lat, #ctx-lon { width: 150px; --input-min-width: 150px; }
+    .msg.loading span {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+      animation: bounce 1.2s infinite;
+      margin: 0 2px;
+    }
+    .msg.loading span:nth-child(2) { animation-delay: 0.2s; }
+    .msg.loading span:nth-child(3) { animation-delay: 0.4s; }
 
-.status-text { font-size: 0.78rem; color: var(--text-2); }
-/* ============ chat ============ */
-#chat-window { flex: 1; overflow-y: auto; padding: 20px 0; display: flex; flex-direction: column; gap: 16px; }
-.msg { max-width: 82%; padding: 11px 14px; border-radius: var(--radius); font-size: 0.88rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-.msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
-.msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; box-shadow: var(--shadow); }
-.msg b { font-weight: 700; }
+    .msg.loading .loading-hint {
+      margin-top: 8px;
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
 
-/* ============ brief ============ */
-h3 { font-size: 1rem; font-weight: 700; margin-bottom: 10px; color: var(--text); }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-6px); }
+    }
 
-.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
-.kpi .val { font-size: 1.4rem; font-weight: 700; color: var(--primary-dark); }
-.kpi .lbl { font-size: 0.7rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.kpi .sub { font-size: 0.78rem; color: var(--text-2); margin-top: 3px; }
+    #input-area {
+      padding: 12px 0 20px;
+      display: flex;
+      gap: 10px;
+    }
 
-.watch { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
-.watch h4 { font-size: 0.82rem; font-weight: 600; margin-bottom: 6px; color: var(--text); }
-.watch p { font-size: 0.82rem; line-height: 1.55; color: var(--text-2); margin-bottom: 4px; }
+    #question {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      outline: none;
+      resize: none;
+      height: 48px;
+      max-height: 160px;
+      overflow-y: auto;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
 
-.chip { background: var(--sgds-bg-alternate); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
+    #question:focus { border-color: #1a56db; }
 
-.brief-outlook { margin-top: 14px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
-.brief-outlook p { font-size: 0.88rem; line-height: 1.65; color: var(--text); }
+    button {
+      padding: 12px 20px;
+      background: #1a56db;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
 
-.provenance { margin-top: 12px; font-size: 0.75rem; color: var(--muted); }
+    button:hover:not(:disabled) { background: #1546b8; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.ctx-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
-.ctx-h { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 6px; }
-.ctx-line { display: flex; justify-content: space-between; gap: 12px; font-size: 0.82rem; line-height: 1.6; }
-.ctx-line .dim { color: var(--muted); }
-.ctx-line.dim { color: var(--muted); font-size: 0.78rem; }
+    #ingest-bar {
+      background: #fef9c3;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      padding: 10px 16px;
+      font-size: 0.83rem;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
 
-.loading { color: var(--muted); font-size: 0.85rem; }
-.dim { color: var(--muted); }
+    #ingest-bar button {
+      background: #d97706;
+      font-size: 0.8rem;
+      padding: 6px 14px;
+      border-radius: 8px;
+    }
 
-/* ============ library ============ */
-.upload-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 0.82rem; font-weight: 600; color: var(--text); cursor: pointer; }
-.upload-btn:hover { border-color: var(--primary); color: var(--primary); }
-.pdf-status { font-size: 0.82rem; color: var(--text-2); }
+    #ingest-bar button:hover:not(:disabled) { background: #b45309; }
+    #pdf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 0 0 10px; padding: 7px 12px; border-radius: 10px;
+      background: #f0f9ff; border: 1px solid #bae6fd; font-size: 0.82rem; }
+    #pdf-bar .pdf-label { font-weight: 600; color: #075985; }
+    #pdf-bar label.pdf-btn { cursor: pointer; padding: 4px 10px; border-radius: 8px;
+      background: #0ea5e9; color: #fff; font-weight: 600; font-size: 0.8rem; }
+    #pdf-bar label.pdf-btn:hover { background: #0284c7; }
+    #pdf-status { color: #0369a1; }
+    #pdf-count { margin-left: auto; color: #64748b; font-size: 0.75rem; }
 
-.lib-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
-.lib-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
-.lib-name { font-size: 0.95rem; font-weight: 600; color: var(--text); }
-.lib-count { font-size: 0.72rem; color: var(--muted); }
-.lib-desc { font-size: 0.82rem; color: var(--text-2); line-height: 1.5; margin-bottom: 10px; }
-.lib-docs { display: flex; flex-wrap: wrap; gap: 6px; }
-.lib-docs a { font-size: 0.78rem; background: var(--sgds-bg-alternate); border: 1px solid var(--border); border-radius: 16px; padding: 4px 10px; color: var(--text-2); text-decoration: none; }
-.lib-docs a:hover { border-color: var(--primary); color: var(--primary); }
-</style>
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      text-align: center;
+      gap: 8px;
+    }
+
+    .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
+    .empty-state p { font-size: 0.9rem; }
+
+    /* --- F2 context strip (Phase 1) ------------------------------------------- */
+    #ctx-strip { width: 100%; max-width: 800px; padding: 10px 0 0; }
+
+    #ctx-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 8px 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    #ctx-toggle {
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      background: #f1f5f9;
+      color: #334155;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #ctx-toggle:hover { background: #e2e8f0; }
+
+    #ctx-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+
+    .ctx-chip {
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      white-space: nowrap;
+    }
+    .ctx-chip .k { opacity: 0.65; font-weight: 400; margin-right: 3px; }
+    .ctx-chip.good { background: #dcfce7; color: #166534; }
+    .ctx-chip.warn { background: #fef9c3; color: #854d0e; }
+    .ctx-chip.bad  { background: #fee2e2; color: #991b1b; }
+    .ctx-chip.info { background: #dbeafe; color: #1e40af; }
+    .ctx-chip.muted{ background: #f1f5f9; color: #64748b; }
+
+    #ctx-stamp { font-size: 0.72rem; color: #64748b; white-space: nowrap; }
+
+    .ctx-icobtn {
+      padding: 5px 10px;
+      background: #f1f5f9;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: #334155;
+    }
+    .ctx-icobtn:hover:not(:disabled) { background: #e2e8f0; }
+    .ctx-icobtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #ctx-detail {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      padding: 12px;
+    }
+    #ctx-detail.hidden { display: none; }
+
+    .ctx-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 640px) { .ctx-cards { grid-template-columns: 1fr; } }
+
+    .ctx-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.8rem;
+      color: #334155;
+      line-height: 1.5;
+    }
+    .ctx-card h3 {
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+    .ctx-card .row { margin: 2px 0; }
+    .ctx-card .dim { color: #94a3b8; font-size: 0.74rem; }
+
+    .ctx-wide { grid-column: 1 / -1; }
+
+    .ctx-protos { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+    .ctx-proto {
+      font-size: 0.72rem;
+      background: #eef2ff;
+      color: #3730a3;
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .ctx-counsel { font-style: italic; color: #475569; margin-top: 4px; font-size: 0.76rem; }
+    .ctx-basis {
+      font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+      margin-left: 6px; white-space: nowrap; cursor: help;
+    }
+    .ctx-basis.b-corpus  { background: #dcfce7; color: #166534; }
+    .ctx-basis.b-partial { background: #fef9c3; color: #854d0e; }
+    .ctx-basis.b-derived { background: #f1f5f9; color: #475569; }
+    .ctx-basis.b-none    { background: #e2e8f0; color: #64748b; }
+    .ctx-legend { font-size: 0.68rem; color: #94a3b8; margin-top: 8px; line-height: 1.7; }
+    .ctx-gaps { color: #92400e; }
+    .ctx-ok { color: #166534; }
+
+    #ctx-locbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      font-size: 0.78rem;
+      color: #475569;
+    }
+    #ctx-locbar input {
+      padding: 5px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      width: 92px;
+      outline: none;
+    }
+    #ctx-locbar input:focus { border-color: #1a56db; }
+    .ctx-sm { padding: 5px 12px; font-size: 0.76rem; border-radius: 8px; }
+
+    #ctx-src { margin-top: 8px; font-size: 0.72rem; color: #94a3b8; }
+    #ctx-src a { color: #1a56db; text-decoration: none; }
+    #ctx-src a:hover { text-decoration: underline; }
+
+    /* --- Phase 6: tabs + brief view ------------------------------------------ */
+    #tabs { width: 100%; max-width: 800px; display: flex; gap: 6px; padding: 10px 16px 0; }
+    #tabs .tab { flex: 1; padding: 8px 0; font-size: 0.85rem; font-weight: 600;
+      background: #e2e8f0; color: #334155; border: none; border-radius: 8px; cursor: pointer; }
+    #tabs .tab:hover { background: #cbd5e1; }
+    #tabs .tab.active { background: #1a56db; color: #fff; }
+
+    main > section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    main > section[hidden] { display: none; }
+    #view-brief, #view-library { overflow-y: auto; gap: 12px; }
+    #view-chat { overflow: hidden; }
+
+    #brief-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    #brief-title { font-size: 1.05rem; font-weight: 600; }
+    #brief-stamp { font-size: 0.72rem; color: #64748b; }
+    #brief-cta-row { display: flex; align-items: center; gap: 10px; }
+    #brief-generate { padding: 8px 14px; font-size: 0.85rem; font-weight: 600;
+      background: #1a56db; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+    #brief-generate:hover { background: #1e40af; }
+    #brief-generate:disabled { background: #94a3b8; cursor: default; }
+    #brief-progress { font-size: 0.75rem; color: #64748b; }
+    .brief-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+      border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; }
+
+    .brief-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .tile { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      padding: 10px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-top: 3px solid #94a3b8; }
+    .tile.good { border-top-color: #16a34a; }
+    .tile.warn { border-top-color: #d97706; }
+    .tile.bad  { border-top-color: #dc2626; }
+    .tile .t { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
+    .tile .v { font-size: 1.05rem; font-weight: 600; margin-top: 2px; }
+    .tile .s { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+
+    .brief-headline { font-size: 1.25rem; font-weight: 600; line-height: 1.4; }
+    .brief-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: #64748b; margin-top: 14px; }
+    .watch-card { background: #fff; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8;
+      border-radius: 10px; padding: 10px 12px; margin-top: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .watch-card .f { font-weight: 600; font-size: 0.9rem; }
+    .watch-card .w { font-size: 0.85rem; color: #334155; margin-top: 2px; }
+    .watch-card .a { font-size: 0.85rem; margin-top: 2px; }
+    .watch-card .a b { color: #1a56db; }
+    .watch-card.src-nea { border-left-color: #1a56db; }
+    .watch-card.src-dgsg { border-left-color: #0e7490; }
+    .watch-card.src-widb { border-left-color: #b45309; }
+    .watch-card.src-ura { border-left-color: #15803d; }
+    .brief-src { display: inline-block; font-size: 0.7rem; background: #f1f5f9; color: #334155;
+      border-radius: 999px; padding: 2px 8px; margin-top: 6px; }
+    .brief-outlook { font-size: 0.95rem; line-height: 1.5; }
+    .brief-prose { background: #fffbeb; border-left: 4px solid #d97706; border-radius: 8px;
+      padding: 10px 12px; font-size: 0.88rem; white-space: pre-wrap; }
+    .brief-footer { font-size: 0.72rem; color: #64748b; margin-top: 12px; line-height: 1.5; }
+    .spot-empty { font-size: 0.85rem; color: #16a34a; }
+
+    /* --- Phase 6: library view ------------------------------------------------ */
+    #lib-totals { font-size: 0.85rem; font-weight: 600; background: #fff;
+      border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .lib-h { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+    .pdf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    .lib-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+      padding: 8px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .lib-card .f, .lib-row .f { font-weight: 600; font-size: 0.85rem; }
+    .lib-card .s, .lib-row .s { font-size: 0.75rem; color: #64748b; }
+    .lib-row { padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.8rem; }
+    .lib-row a, .lib-card a { color: #1a56db; text-decoration: none; word-break: break-all; }
+    .lib-row a:hover, .lib-card a:hover { text-decoration: underline; }
+    .s.dim { color: #94a3b8; }
+  </style>
 </head>
-
 <body>
+
 <header>
-  <div class="logo" aria-hidden="true">CR</div>
   <div>
-    <h1>CP RAG</h1>
-    <p>Care protocol assistant — primary care SG + MOH + live local context</p>
+    <h1>Care Protocol Assistant</h1>
+    <p>Powered by HSG Primary Care Pages</p>
   </div>
-  <sgds-badge id="status-badge" show variant="neutral" class="sgds:m-auto">Checking…</sgds-badge>
+  <span id="status-badge">Checking...</span>
 </header>
 
+<nav id="tabs">
+  <button class="tab" data-tab="brief" onclick="switchTab('brief')">Brief</button>
+  <button class="tab" data-tab="chat" onclick="switchTab('chat')">Chat</button>
+  <button class="tab" data-tab="library" onclick="switchTab('library')">Library</button>
+</nav>
+
 <main>
-  <sgds-tab-group id="app-tabs" variant="solid">
-    <sgds-tab slot="nav" panel="brief" active>Brief</sgds-tab>
-    <sgds-tab slot="nav" panel="chat">Clinical Flight Bag</sgds-tab>
-    <sgds-tab slot="nav" panel="library">Library</sgds-tab>
-
-    <!-- ===== Brief ===== -->
-    <sgds-tab-panel name="brief">
-      <div class="sgds:flex sgds:flex-wrap sgds:items-end sgds:gap-3 sgds:rounded-lg sgds:border sgds:border-border-color-muted sgds:bg-background-color-surface-default sgds:p-3">
-        <sgds-input id="ctx-pc" type="text" label="Postcode" placeholder="e.g. 641518" value="641518"></sgds-input>
-        <sgds-input id="ctx-lat" type="text" label="Latitude" placeholder="1.3454017" value="1.3454017"></sgds-input>
-        <sgds-input id="ctx-lon" type="text" label="Longitude" placeholder="103.7188383" value="103.7188383"></sgds-input>
-        <sgds-button id="ctx-refresh-btn" size="sm" variant="outline" onclick="refreshContext(event)">Update</sgds-button>
-        <sgds-button size="sm" variant="ghost" onclick="applyPreset()">Default</sgds-button>
-        <sgds-button id="brief-gen-btn" size="sm" variant="primary" onclick="generateBrief(event)">Generate Brief</sgds-button>
-        <div class="sgds:m-auto sgds:flex sgds:items-center sgds:gap-2">
-          <span id="brief-status" class="status-text">Brief: none yet.</span>
-          <sgds-button id="refresh-data-btn" size="sm" variant="outline" onclick="refreshData(event)">Refresh</sgds-button>
+  <section id="view-brief">
+    <div id="brief-head">
+      <div id="brief-title-row">
+        <span id="brief-title">Clinic brief</span>
+        <span id="brief-stamp"></span>
+      </div>
+      <div id="ctx-locbar">
+        <span>Clinic:</span>
+        <input id="ctx-pc" placeholder="Postcode" maxlength="6">
+        <input id="ctx-lat" placeholder="Lat" type="number" step="any">
+        <input id="ctx-lon" placeholder="Lon" type="number" step="any">
+        <button class="ctx-sm" onclick="updateCtxLocation()">Update</button>
+        <button class="ctx-sm" onclick="resetCtxLocation()">Default</button>
+      </div>
+      <div id="brief-cta-row">
+        <button id="brief-generate" onclick="generateBrief()">Generate Brief</button>
+        <span id="brief-progress"></span>
+      </div>
+    </div>
+    <div id="brief-tiles" class="brief-tiles"></div>
+    <div id="brief-error" class="brief-error" hidden></div>
+    <div id="brief-content"></div>
+    <section id="ctx-strip">
+      <div id="ctx-bar">
+        <button id="ctx-toggle" onclick="toggleCtx()" aria-expanded="false">Raw context data ▸</button>
+        <div id="ctx-chips"><span class="ctx-chip muted">Loading context…</span></div>
+        <span id="ctx-stamp"></span>
+        <button id="ctx-refresh" class="ctx-icobtn" onclick="refreshContext()" title="Refresh context">⟳</button>
+      </div>
+      <div id="ctx-detail" class="hidden">
+        <div id="ctx-cards" class="ctx-cards"></div>
+        <div id="ctx-src">
+          Live population-level data from data.gov.sg (Singapore Open Data License) ·
+          <a href="https://api-open.data.gov.sg" target="_blank" rel="noopener">api-open.data.gov.sg</a>
         </div>
       </div>
+    </section>
+  </section>
+  <section id="view-chat" hidden>
+    <div id="ingest-bar" style="display:none">
+      Knowledge base not found. Run ingestion to scrape and index the care protocols.
+      <button id="ingest-btn" onclick="runIngest()">Run Ingestion</button>
+    </div>
 
-      <sgds-alert id="ingest-alert" variant="warning" title="Knowledge base not found." hidden>
-        RAG answers need the knowledge base. Ingest takes a few minutes and uses API credits.
-        <sgds-button slot="action" size="sm" variant="primary" onclick="ingest(event)">Run Ingestion</sgds-button>
-      </sgds-alert>
-
-      <sgds-alert id="brief-error" variant="danger" title="Brief unavailable" hidden></sgds-alert>
-
-      <sgds-alert id="brief-prose-head" variant="warning" outlined title="AI response was cut off" hidden>
-        <span id="brief-prose-desc"></span>
-        <sgds-button slot="action" size="sm" variant="ghost" onclick="copyBrief(this)">&#10697; Copy</sgds-button>
-      </sgds-alert>
-
-      <div id="brief-body">
-        <p class="loading">Loading brief status…</p>
+    <div id="chat-window">
+      <div class="empty-state" id="empty-state">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 01-4-.833L3 20l1.167-4A8.002 8.002 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <p>Ask a question about Singapore's chronic care protocols.</p>
       </div>
+    </div>
 
-      <div class="ctx-section sgds:mt-4">
-        <h3>Live Context (this location)</h3>
-        <div id="ctx-grid" class="sgds:grid sgds:grid-cols-1 sgds:md:grid-cols-2 sgds:gap-3">
-          <p class="loading">Loading context…</p>
-        </div>
-      </div>
-    </sgds-tab-panel>
-
-    <!-- ===== Clinical Flight Bag (chat) ===== -->
-    <sgds-tab-panel name="chat">
-      <div id="chat-window">
-        <div class="msg bot">
-          I'm the <b>CP RAG</b> assistant. Ask about asthma, diabetes, hypertension or common SG primary care conditions.
-        </div>
-      </div>
-      <div class="sgds:flex sgds:items-end sgds:gap-3">
-        <sgds-textarea id="question" class="sgds:flex-1" placeholder="Ask a clinical question — e.g. 'How do I step up a beta-agonist for asthma?'" rows="3" resize="auto" onkeydown="handleKey(event)"></sgds-textarea>
-        <sgds-button id="send-btn" size="lg" variant="primary" onclick="sendMessage(event)">Send</sgds-button>
-      </div>
-    </sgds-tab-panel>
-
-    <!-- ===== Library ===== -->
-    <sgds-tab-panel name="library">
-      <div class="sgds:flex sgds:flex-wrap sgds:items-center sgds:gap-3 sgds:rounded-lg sgds:border sgds:border-border-color-muted sgds:bg-background-color-surface-default sgds:p-3">
-        <label class="upload-btn" for="pdf-file">&#11014; Upload guideline PDF…</label>
-        <input type="file" id="pdf-file" accept=".pdf" hidden onchange="uploadPdf(this)">
-        <sgds-button size="sm" variant="outline" onclick="ingest(event)">Rebuild knowledge base (web sources)</sgds-button>
-        <span id="pdf-status" class="pdf-status" hidden></span>
-      </div>
-      <div id="lib-cards" class="sgds:mt-3 sgds:grid sgds:gap-3"></div>
-    </sgds-tab-panel>
-  </sgds-tab-group>
+    <div id="input-area">
+      <textarea id="question" placeholder="Ask about care protocols..." rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </section>
+  <section id="view-library" hidden>
+    <div id="pdf-bar">
+      <span class="pdf-label">Clinical guidelines</span>
+      <label class="pdf-btn">Upload PDF<input id="pdf-file" type="file"
+        accept="application/pdf,.pdf" style="display:none" onchange="uploadPdf(this)"></label>
+      <span id="pdf-status"></span>
+      <span id="pdf-count"></span>
+    </div>
+    <div id="library"><div class="empty-state" style="flex:none;padding:20px 0"><p>Library</p></div></div>
+  </section>
 </main>
 
 <script>
-/* ============ helpers ============ */
-function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  const chatWindow = document.getElementById('chat-window');
+  const questionInput = document.getElementById('question');
+  const sendBtn = document.getElementById('send-btn');
+  const statusBadge = document.getElementById('status-badge');
+  const ingestBar = document.getElementById('ingest-bar');
+  const emptyState = document.getElementById('empty-state');
+  const ingestBtn = document.getElementById('ingest-btn');
 
-/* ============ status badge ============ */
-const statusBadge = document.getElementById('status-badge');
-const ingestAlert = document.getElementById('ingest-alert');
-
-function showIngest(){ ingestAlert.hidden = false; ingestAlert.show = true; }
-function hideIngest(){ ingestAlert.hidden = true; ingestAlert.show = false; }
-
-async function checkStatus(){
-  statusBadge.textContent = 'Checking…';
-  statusBadge.setAttribute('variant','neutral');
-  try {
-    const d = await fetch('/api/status').then(r=>r.json());
-    if(d.ready){ statusBadge.textContent='Ready'; statusBadge.setAttribute('variant','success'); hideIngest(); }
-    else { statusBadge.textContent='Not ready'; statusBadge.setAttribute('variant','danger'); showIngest(); }
-  } catch {
-    statusBadge.textContent='Not ready'; statusBadge.setAttribute('variant','danger');
+  async function checkStatus() {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      if (data.ready) {
+        statusBadge.textContent = 'Ready';
+        statusBadge.className = 'ready';
+        ingestBar.style.display = 'none';
+        sendBtn.disabled = false;
+        questionInput.disabled = false;
+      } else {
+        statusBadge.textContent = 'Not ready';
+        statusBadge.className = 'not-ready';
+        ingestBar.style.display = 'flex';
+        sendBtn.disabled = true;
+        questionInput.disabled = true;
+      }
+    } catch {
+      statusBadge.textContent = 'Offline';
+      statusBadge.className = 'not-ready';
+    }
   }
-}
 
-/* ============ tabs ============ */
-const tabGroup = document.getElementById('app-tabs');
-let suppressTabEvent = false;
-
-function applyTab(t){
-  if(t==='chat') setTimeout(()=>document.getElementById('question').focus(), 0);
-  if(t==='brief') updateBriefStatus();
-}
-
-function switchTab(name, push=true){
-  if(!['brief','chat','library'].includes(name)) name='brief';
-  if(push && location.hash !== '#/'+name) history.pushState(null,'','#/'+name);
-  suppressTabEvent = true;
-  try { tabGroup.show(name); } finally { suppressTabEvent = false; }
-  applyTab(name);
-}
-
-tabGroup.addEventListener('sgds-tab-show', (e) => {
-  if(suppressTabEvent) return;
-  const name = e.detail.name;
-  if(location.hash !== '#/'+name) history.pushState(null,'','#/'+name);
-  applyTab(name);
-});
-
-window.addEventListener('hashchange', () => switchTab(location.hash.slice(2), false));
-
-/* ============ chat ============ */
-function addMsg(role, text){
-  const w = document.getElementById('chat-window');
-  const d = document.createElement('div');
-  d.className = 'msg ' + role;
-  d.textContent = text;
-  w.appendChild(d);
-  w.scrollTop = w.scrollHeight;
-  return d;
-}
-
-async function sendMessage(event){
-  if(event) event.preventDefault();
-  const q = document.getElementById('question');
-  const text = (q.value || '').trim();
-  if(!text) return;
-  addMsg('user', text);
-  q.value = '';
-  const dots = addMsg('bot', '…');
-  try {
-    const r = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: text}) });
-    const d = await r.json();
-    dots.remove();
-    addMsg('bot', d.answer || d.error || 'No answer.');
-  } catch(err){
-    dots.remove();
-    addMsg('bot', '⚠ Request failed: ' + err);
+  function addMessage(role, content, sources) {
+    emptyState && emptyState.remove();
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.innerHTML = content;
+    if (sources && sources.length) {
+      const s = document.createElement('div');
+      s.className = 'sources';
+      s.innerHTML = '<strong>Sources:</strong>' + sources.map(
+        u => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`
+      ).join('');
+      div.appendChild(s);
+    }
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return div;
   }
-}
 
-function handleKey(e){
-  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
-}
-/* ============ brief ============ */
-async function generateBrief(event){
-  const b = event.currentTarget;
-  b.loading = true;
-  try {
-    const r = await fetch('/api/brief', { method:'POST' });
-    const d = await r.json();
-    if(d.ok){ renderBrief(d); }
-    else { const e=document.getElementById('brief-error'); e.hidden=false; e.show=true; e.textContent='Could not generate brief: '+(d.error||'unknown error'); }
-  } catch(err){
-    const e=document.getElementById('brief-error'); e.hidden=false; e.show=true; e.textContent='Request failed: '+err;
-  } finally { b.loading = false; }
-}
+  async function sendMessage() {
+    const question = questionInput.value.trim();
+    if (!question) return;
 
-function copyBrief(btn){
-  navigator.clipboard.writeText(document.getElementById('brief-body').innerText)
-    .then(()=>{ btn.textContent='✓ Copied'; setTimeout(()=>btn.textContent='⧉ Copy',1500); });
-}
+    addMessage('user', escapeHtml(question));
+    questionInput.value = '';
+    autoResize(questionInput);
 
-function renderBrief(b){
-  const be = document.getElementById('brief-error'); be.hidden = true; be.show = false;
-  const head = document.getElementById('brief-prose-head');
-  let html = '';
-  if(b.kpis && b.kpis.length){
-    html += `<div class="sgds:grid sgds:grid-cols-1 sgds:sm:grid-cols-2 sgds:md:grid-cols-3 sgds:gap-3 sgds:mt-3">`
-      + b.kpis.map(k=>`<div class="kpi"><div class="val">${escapeHtml(k.value)}</div><div class="lbl">${escapeHtml(k.label)}</div>${k.sub?`<div class="sub">${escapeHtml(k.sub)}</div>`:''}</div>`).join('');
-    html += `</div>`;
+    sendBtn.disabled = true;
+    const loading = document.createElement('div');
+    loading.className = 'msg bot loading';
+    loading.innerHTML = '<span></span><span></span><span></span>';
+    const hint = document.createElement('div');
+    hint.className = 'loading-hint';
+    hint.textContent = 'Thinking…';
+    loading.appendChild(hint);
+    const t0 = Date.now();
+    const hintTimer = setInterval(() => {
+      hint.textContent = 'Thinking… ' + Math.floor((Date.now() - t0) / 1000) + 's';
+    }, 1000);
+    chatWindow.appendChild(loading);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      loading.remove();
+      if (res.ok) {
+        addMessage('bot', escapeHtml(data.answer), data.sources);
+      } else {
+        addMessage('bot', `Error: ${data.detail || 'Unknown error'}`);
+      }
+    } catch (e) {
+      loading.remove();
+      addMessage('bot', 'Network error. Is the server running?');
+    } finally {
+      clearInterval(hintTimer);
+      sendBtn.disabled = false;
+      questionInput.focus();
+    }
   }
-  if(b.watch_out && b.watch_out.length){
-    html += `<div class="sgds:grid sgds:gap-3 sgds:mt-3">` + b.watch_out.map(w=>`<div class="watch"><h4>${escapeHtml(w.title)}</h4>${w.items.map(i=>`<p>${escapeHtml(i)}</p>`).join('')}</div>`).join('') + `</div>`;
-  }
-  if(b.key_drivers && b.key_drivers.length){
-    html += `<div class="sgds:flex sgds:flex-wrap sgds:gap-3 sgds:mt-3">` + b.key_drivers.map(x=>`<span class="chip">${escapeHtml(x)}</span>`).join('') + `</div>`;
-  }
-  if(b.outlook){
-    html += `<div class="brief-outlook"><p>${escapeHtml(b.outlook)}</p></div>`;
-  }
-  if(b.provenance_note){
-    html += `<p class="provenance">ⓘ ${escapeHtml(b.provenance_note)}</p>`;
-  }
-  document.getElementById('brief-body').innerHTML = html || '<p class="dim">No brief data.</p>';
-  if(b.prose_fallback){
-    head.hidden = false; head.show = true;
-    document.getElementById('brief-prose-desc').textContent = (b.provenance_note ? b.provenance_note + ' — ' : '') + 'Showing raw AI response — structure was not detected.';
-  } else {
-    head.hidden = true; head.show = false;
-  }
-}
-/* ============ context ============ */
-async function loadContext(){
-  try {
-    const d = await fetch('/api/context').then(r=>r.json());
-    document.getElementById('ctx-pc').value = d.postcode || '';
-    document.getElementById('ctx-lat').value = d.lat != null ? d.lat : '';
-    document.getElementById('ctx-lon').value = d.lon != null ? d.lon : '';
-    document.getElementById('ctx-grid').innerHTML = buildContextDetail(d);
-    document.title = 'CP RAG — ' + (d.postcode || 'context');
-  } catch(e){
-    document.getElementById('ctx-grid').innerHTML = '<p class="dim">Failed to load context.</p>';
-  }
-}
 
-function applyPreset(){
-  document.getElementById('ctx-pc').value = '641518';
-  document.getElementById('ctx-lat').value = '1.3454017';
-  document.getElementById('ctx-lon').value = '103.7188383';
-}
-
-async function refreshContext(event){
-  const b = event.currentTarget;
-  b.loading = true;
-  try {
-    await fetch('/api/context', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        postcode: document.getElementById('ctx-pc').value.trim(),
-        lat: parseFloat(document.getElementById('ctx-lat').value) || null,
-        lon: parseFloat(document.getElementById('ctx-lon').value) || null,
-      })});
-    await loadContext();
-  } catch(err){ console.error(err); }
-  finally { b.loading = false; }
-}
-
-function fmtTime(ts){ try { return new Date(ts*1000).toLocaleString('en-SG'); } catch { return '—'; } }
-
-function buildContextDetail(c){
-  let h = '';
-  h += `<div class="ctx-card"><div class="ctx-h">Area</div>`;
-  h += `<div class="ctx-line"><span>Postcode</span><b>${escapeHtml(c.postcode||'—')}</b></div>`;
-  h += `<div class="ctx-line"><span>PLA</span><span class="dim">${escapeHtml(c.pla_name||'—')}</span></div>`;
-  h += `<div class="ctx-line"><span>MCU</span><span class="dim">${escapeHtml(c.mcu_name||'—')}</span></div>`;
-  h += `<div class="ctx-line"><span>Hospitals nearby</span><span class="dim">${escapeHtml((c.nearby_hospitals||[]).join('; '))}</span></div>`;
-  h += `<div class="ctx-line"><span>Clinics nearby</span><span class="dim">${escapeHtml((c.nearby_clinics||[]).join('; '))}</span></div>`;
-  h += `</div>`;
-  h += `<div class="ctx-card"><div class="ctx-h">Environment</div>`;
-  h += `<div class="ctx-line"><span>Weather (live)</span><span class="dim">${escapeHtml(c.weather_desc||'—')}</span></div>`;
-  h += `<div class="ctx-line"><span>Temperature</span><b>${c.temp_c!=null? c.temp_c+'°C':'—'}</b></div>`;
-  h += `<div class="ctx-line"><span>Humidity</span><span class="dim">${c.humidity!=null? c.humidity+'%':'—'}</span></div>`;
-  h += `<div class="ctx-line"><span>Wind</span><span class="dim">${escapeHtml(c.wind_kmh||'—')} km/h ${escapeHtml(c.wind_dir||'')}</span></div>`;
-  h += `<div class="ctx-line"><span>Air quality (PSI)</span><b>${escapeHtml(c.psi!=null? c.psi+' '+escapeHtml(c.psi_desc||''):'—')}</b></div>`;
-  h += `</div>`;
-  h += `<div class="ctx-card"><div class="ctx-h">Alerts & Notices (MOH, live)</div>`;
-  h += `<div class="ctx-line"><span>Active alerts</span><b>${c.active_alerts??'—'}</b></div>`;
-  if(c.latest_alert){
-    h += `<div class="ctx-line" style="margin-top:6px"><span>${escapeHtml(c.latest_alert.name||'Alert')}</span><span class="dim">${escapeHtml(fmtTime(c.latest_alert.start_time))}</span></div>`;
+  async function runIngest() {
+    ingestBtn.disabled = true;
+    ingestBtn.textContent = 'Ingesting...';
+    try {
+      const res = await fetch('/api/ingest', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        ingestBtn.textContent = `Done (${data.chunks} chunks)`;
+        await checkStatus();
+      } else {
+        ingestBtn.textContent = 'Failed';
+        ingestBtn.disabled = false;
+      }
+    } catch {
+      ingestBtn.textContent = 'Error';
+      ingestBtn.disabled = false;
+    }
   }
-  if(c.notices && c.notices.length){
-    h += `<div class="ctx-line" style="margin-top:6px"><span>Latest notice</span><span class="dim">${escapeHtml(c.notices[0].headline||'')}</span></div>`;
+
+  async function refreshPdfs() {
+    try {
+      const res = await fetch('/api/pdfs');
+      const data = await res.json();
+      const n = (data.pdfs || []).length;
+      document.getElementById('pdf-count').textContent =
+        n ? (n + ' guideline PDF' + (n > 1 ? 's' : '') + ' in store') : '';
+    } catch (e) { /* server not up yet */ }
   }
-  h += `</div>`;
-  h += `<div class="ctx-card"><div class="ctx-h">Public Health</div>`;
-  h += `<div class="ctx-line"><span>DPH alerts active</span><b>${c.dph_alerts??'—'}</b></div>`;
-  h += `<div class="ctx-line"><span>Next MDT</span><span class="dim">${escapeHtml(c.next_mdt||'—')}</span></div>`;
-  h += `<div class="ctx-line"><span>Surveillance notes</span><span class="dim">${escapeHtml(c.surveillance_notes||'—')}</span></div>`;
-  h += `</div>`;
-  return h;
-}
-/* ============ library ============ */
-async function loadLibrary(){
-  try {
-    const d = await fetch('/api/library').then(r=>r.json());
-    document.getElementById('lib-cards').innerHTML = (d.sources||[]).map(src=>`
-      <div class="lib-card">
-        <div class="lib-head"><span class="lib-name">${escapeHtml(src.name)}</span><span class="lib-count">${escapeHtml(src.count||'')} docs</span></div>
-        <div class="lib-desc">${escapeHtml(src.desc||'')}</div>
-        <div class="lib-docs">${(src.docs||[]).map(d2=>`<a href="${d2.url}" target="_blank" rel="noopener">${escapeHtml(d2.name)}</a>`).join('')}</div>
-      </div>`).join('');
-  } catch(e){
-    document.getElementById('lib-cards').innerHTML = '<p class="dim">Failed to load library.</p>';
+
+  async function uploadPdf(input) {
+    const f = input.files && input.files[0];
+    input.value = '';
+    if (!f) return;
+    const status = document.getElementById('pdf-status');
+    status.textContent = 'Uploading + embedding...';
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      status.textContent = 'Uploading + embedding... ' +
+        Math.floor((Date.now() - t0) / 1000) + 's';
+    }, 1000);
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('title', f.name.replace(/\.pdf$/i, ''));
+      const res = await fetch('/api/ingest-pdf', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+      status.textContent = data.skipped
+        ? 'Already in store (duplicate)'
+        : 'Added ' + data.chunks_added + ' chunks';
+      refreshPdfs();
+      if (typeof loadLibrary === 'function') loadLibrary();
+    } catch (e) {
+      status.textContent = 'Upload failed: ' + e.message;
+    } finally {
+      clearInterval(timer);
+    }
   }
-}
+  refreshPdfs();
 
-async function uploadPdf(input){
-  const f = input.files[0];
-  if(!f) return;
-  const st = document.getElementById('pdf-status');
-  st.hidden = false; st.textContent = 'Uploading…';
-  const fd = new FormData(); fd.append('file', f);
-  try {
-    const r = await fetch('/api/upload', { method:'POST', body: fd }).then(r=>r.json());
-    st.textContent = 'Uploaded '+(r.pages||'')+' pages: '+(r.filename||f.name);
-  } catch(err){ st.textContent = 'Upload failed: '+err; }
-}
+  // --- Phase 6: library ------------------------------------------------------
+  let lastLibrary = null;
+  async function loadLibrary() {
+    const el = document.getElementById('library');
+    if (!el) return;
+    try {
+      const res = await fetch('/api/library');
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      lastLibrary = d;
+      renderLibrary(d);
+    } catch (e) {
+      el.innerHTML = '<div class="brief-error">Library unavailable: '
+        + escapeHtml(String(e.message || e)) + '</div>';
+    }
+  }
+  function renderLibrary(d) {
+    const el = document.getElementById('library');
+    const t = d.totals || {};
+    const docs = (t.guideline_pdfs || 0) + (t.protocol_pages || 0) + (t.public_guidance_pages || 0);
+    let html = '<div id="lib-totals">' + t.chunks + ' chunks · ' + docs + ' documents: '
+      + (t.guideline_pdfs || 0) + ' guideline PDFs · ' + (t.protocol_pages || 0)
+      + ' protocol pages · ' + (t.public_guidance_pages || 0) + ' guidance pages</div>';
 
-async function ingest(event){
-  const b = event.currentTarget;
-  b.disabled = true;
-  try {
-    await fetch('/api/ingest', { method:'POST' });
-    showIngest();
-    await checkStatus();
-  } finally { b.disabled = false; }
-}
+    html += '<h3 class="lib-h">Clinical guideline PDFs</h3><div class="pdf-grid">';
+    html += (d.pdfs || []).map(p => {
+      const src = p.source || '';
+      const link = /^https?:/.test(src)
+        ? ' <a class="s" href="' + escapeHtml(src) + '" target="_blank" rel="noopener">source</a>' : '';
+      return '<div class="lib-card"><div class="f">' + escapeHtml(p.title || 'Untitled PDF') + '</div>'
+        + '<div class="s">' + p.chunks + ' chunks' + link
+        + (p.doc_hash ? ' · <span title="' + escapeHtml(p.doc_hash) + '">' + escapeHtml(p.doc_hash.slice(0, 8)) + '</span>' : '')
+        + '</div></div>';
+    }).join('');
+    html += '</div>';
 
-async function refreshData(event){
-  const b = event.currentTarget;
-  b.loading = true;
-  try {
-    await fetch('/api/refresh-data', { method:'POST' });
-    updateBriefStatus();
-  } catch(err){ console.error(err); }
-  finally { b.loading = false; }
-}
+    const webSec = (name, rows, otherCount) => {
+      let h = '<h3 class="lib-h">' + name + '</h3>';
+      if (!rows || !rows.length) { h += '<div class="s dim">none in corpus</div>'; return h; }
+      if (rows.length > 25) {   // URL-sprawl collapse rule (spec §9)
+        h += '<div class="lib-card"><div class="s">' + rows.length
+          + ' pages — collapsed (URL sprawl). Full list: `curl /api/library`.</div></div>';
+        if (otherCount) h += '<div class="s dim" style="margin-top:4px">' + otherCount
+          + ' other pages on this site (nav / crawl context) — not protocol content.</div>';
+        return h;
+      }
+      h += rows.map(r => '<div class="lib-row"><span class="f">' + escapeHtml(r.derived_title) + '</span> '
+        + '<a class="s" href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">'
+        + escapeHtml(r.url) + '</a> <span class="s dim">' + r.chunks + ' chunks</span></div>').join('');
+      return h;
+    };
+    const ws = d.web_sources || {};
+    // Protocol section = care-protocol URLs only (the depth-2 crawl also
+    // captured site nav pages; they stay countable, never listed as protocols).
+    const pcs = ws['primarycarepages.sg'] || [];
+    const proto = pcs.filter(r => r.url.indexOf('/care-protocols/') !== -1);
+    html += webSec('Care-protocol pages (primarycarepages.sg)',
+      proto.length ? proto : null, pcs.length - proto.length);
+    html += webSec('Public health guidance (moh.gov.sg)', ws['moh.gov.sg']);
+    el.innerHTML = html;
+  }
 
-function updateBriefStatus(){
-  const el = document.getElementById('brief-status');
-  if(!el) return;
-  try {
-    const fs = JSON.parse(localStorage.getItem('cp_rag_brief_status')||'{}');
-    if(fs.briefed_at){
-      const mins = Math.floor((Date.now()/1000 - fs.briefed_at)/60);
-      let age = mins<1?'just now':mins<60?mins+'m ago':Math.floor(mins/60)+'h ago';
-      el.textContent = 'Brief: ' + (fs.status==='fresh'? 'fresh ' : 'stale ') + age;
-    } else { el.textContent = 'Brief: none yet.'; }
-  } catch { el.textContent = 'Brief: none yet.'; }
-}
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
 
-/* ============ init ============ */
-checkStatus();
-loadContext();
-loadLibrary();
-updateBriefStatus();
-switchTab(location.hash.slice(2), false);
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+  }
+
+  // --- F2 context strip (Phase 1) -------------------------------------------------
+  const ctxChips = document.getElementById('ctx-chips');
+  const ctxStamp = document.getElementById('ctx-stamp');
+  const ctxDetail = document.getElementById('ctx-detail');
+  const ctxCards = document.getElementById('ctx-cards');
+  const ctxToggle = document.getElementById('ctx-toggle');
+
+  let ctxQuery = {};            // {} => server default (test clinic)
+  let ctxLoading = false;
+
+  // --- Phase 6: tabs + brief ------------------------------------------------
+  let lastSnap = null;           // latest snapshot; renderContext() sets it
+  let brief = { status: 'none', data: null, generating: false };
+  const SRC_CLASS = { 'NEA': 'nea', 'data.gov.sg': 'dgsg', 'CDA WIDB': 'widb', 'URA': 'ura' };
+
+  const TABS = ['brief', 'chat', 'library'];
+  function currentTab() {
+    const t = (location.hash || '').replace(/^#\//, '');
+    return TABS.includes(t) ? t : 'brief';
+  }
+  function applyTab(tab) {
+    document.getElementById('view-brief').hidden = tab !== 'brief';
+    document.getElementById('view-chat').hidden = tab !== 'chat';
+    document.getElementById('view-library').hidden = tab !== 'library';
+    document.querySelectorAll('#tabs .tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.tab === tab));
+    if (tab === 'brief') {
+      if (!lastSnap) refreshContext();   // first visit: populate tiles (free)
+      loadBrief();                       // free GET — never a POST (credit guard)
+    }
+    if (tab === 'library') loadLibrary();
+  }
+  function switchTab(tab) {
+    if (location.hash !== '#/' + tab) location.hash = '#/' + tab;
+    else applyTab(tab);
+  }
+  window.addEventListener('hashchange', () => applyTab(currentTab()));
+  const CTX_REFRESH_MS = 15 * 60 * 1000;
+
+  async function refreshContext() {
+    if (ctxLoading) return;
+    ctxLoading = true;
+    ctxChips.innerHTML = '<span class="ctx-chip muted">Building context… (first build can take ~40 s)</span>';
+    ctxStamp.textContent = '';
+    document.getElementById('ctx-refresh').disabled = true;
+    try {
+      const qs = new URLSearchParams(ctxQuery).toString();
+      const res = await fetch('/api/context' + (qs ? '?' + qs : ''));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+      renderContext(data, res.headers.get('X-Snapshot-Cache') === 'hit');
+    } catch (e) {
+      ctxChips.innerHTML = '<span class="ctx-chip bad">Context error: '
+        + escapeHtml(String(e.message || e)) + '</span>';
+    } finally {
+      ctxLoading = false;
+      document.getElementById('ctx-refresh').disabled = false;
+    }
+  }
+
+  function chipHtml(k, v, cls) {
+    return `<span class="ctx-chip ${cls || ''}"><span class="k">${k}</span>${escapeHtml(v)}</span>`;
+  }
+  function pm25Cls(v) { return v >= 25 ? 'bad' : (v >= 15 ? 'warn' : 'good'); }
+  function psiCls(v)  { return v >= 101 ? 'bad' : (v >= 51 ? 'warn' : 'good'); }
+  function heatCls(v) { return v === 'High' ? 'bad' : (v === 'Moderate' ? 'warn' : 'good'); }
+
+  function renderContext(snap, cached) {
+    lastSnap = snap;
+    const c = (snap.meta || {}).clinic || {};
+    const aq = snap.air_quality || {};
+    const w = snap.weather || {};
+    const d = snap.dengue || {};
+    const pl = snap.protocol_links || {};
+    const pm = aq.pm25, psi = aq.psi, wb = w.wbgt;
+    const days = (w.outlook_4day && w.outlook_4day.days) || [];
+    const near = d.nearby_clusters || [];
+    const active = pl.active || [];
+
+    // --- one-line chips ---
+    const chips = [];
+    if (pm && pm.peak != null) chips.push(chipHtml('PM2.5', pm.peak.toFixed(0) + ' ' + (pm.peak_region || ''), pm25Cls(pm.peak)));
+    if (psi && psi.peak != null) chips.push(chipHtml('PSI', String(psi.peak), psiCls(psi.peak)));
+    if (wb && wb.max_wbgt_c != null) chips.push(chipHtml('WBGT', wb.max_wbgt_c.toFixed(1) + '°C ' + (wb.max_heat_stress || ''), heatCls(wb.max_heat_stress)));
+    const rainy = days.filter(x => x.text && /thunder|shower/i.test(x.text)).map(x => x.day || '');
+    if (rainy.length) chips.push(chipHtml('Rain', rainy.join(', '), 'info'));
+    if (near.length) chips.push(chipHtml('Dengue', (near[0].locality || '') + ' ' + (near[0].case_size || 0) + ' cases ' + near[0].km + ' km', 'bad'));
+    if (d.in_high_aedes_area) chips.push(chipHtml('Aedes', 'high area', 'warn'));
+    const dw = snap.disease_week || {}, dwD = dw.dengue || {};
+    if (dwD.week != null) chips.push(chipHtml('WIDB W' + ((dw.epi_week || '').split('-W')[1] || '?'),
+      'dengue ' + dwD.week + (dwD.prev_week != null ? ' (prev ' + dwD.prev_week + ')' : ''),
+      dwD.median_5yr != null && dwD.week > dwD.median_5yr ? 'warn' : 'info'));
+    const cc = snap.catchment_change || {};
+    if (cc.healthcare_decisions_90d_count != null)
+      chips.push(chipHtml('URA 90d', cc.healthcare_decisions_90d_count + ' healthcare-related', 'info'));
+    if (active.length) chips.push(chipHtml('Protocols', active.length + ' linked', 'info'));
+    else chips.push(chipHtml('Signals', 'none elevated', 'good'));
+    if ((snap.data_gaps || []).length) chips.push(chipHtml('Gaps', String(snap.data_gaps.length), 'warn'));
+    ctxChips.innerHTML = chips.join('');
+
+    ctxStamp.textContent =
+      ((snap.meta && snap.meta.generated_at) ? 'as of ' + new Date(snap.meta.generated_at).toLocaleString() : '')
+      + (cached ? ' · cached' : '');
+
+    // --- detail cards ---
+    let airHtml = '<h3>Air quality</h3>';
+    if (pm) {
+      airHtml += `<div class="row"><strong>PM2.5</strong> peak ${pm.peak} µg/m³ (${escapeHtml(pm.peak_region || '?')}) · national ${pm.national != null ? pm.national : '—'}</div>`;
+      airHtml += Object.entries(pm.regions || {}).map(([r, v]) =>
+        `<div class="row dim">${escapeHtml(r)}: ${v}</div>`).join('');
+      airHtml += `<div class="row dim">updated ${escapeHtml((pm.updated || '').slice(11, 16) || '?')}</div>`;
+    } else airHtml += '<div class="row dim">pm25 unavailable (see data gaps)</div>';
+    if (psi) airHtml += `<div class="row" style="margin-top:6px"><strong>PSI</strong> peak ${psi.peak} (${escapeHtml(psi.peak_region || '?')}) · national ${psi.national != null ? psi.national : '—'}</div>`;
+    else airHtml += '<div class="row dim">psi unavailable (see data gaps)</div>';
+
+    let weatherHtml = '<h3>Weather &amp; heat</h3>';
+    if (w.today) weatherHtml += `<div class="row"><strong>Today</strong> ${w.today.high_c}/${w.today.low_c}°C — ${escapeHtml(w.today.text || '')}</div>`;
+    if (w.town_2hr) weatherHtml += `<div class="row">2-hr near ${escapeHtml(w.town_2hr.town || '?')} (${w.town_2hr.distance_km} km): ${escapeHtml(w.town_2hr.forecast || '')}</div>`;
+    if (wb) {
+      const ns = wb.nearest_station || {};
+      weatherHtml += `<div class="row"><strong>WBGT</strong> max ${wb.max_wbgt_c}°C (${escapeHtml(wb.max_heat_stress || '?')}) · nearest ${escapeHtml(ns.name || '?')}: ${ns.wbgt_c}°C ${escapeHtml(ns.heat_stress || '')} (${ns.km} km)</div>`;
+    }
+    if (w.flood) {
+      const n = (w.flood.active_alerts || []).length;
+      weatherHtml += `<div class="row">Flood: ${n ? n + ' active alert(s)' : 'no active alerts'}</div>`;
+    }
+    if (days.length) {
+      weatherHtml += '<div class="row" style="margin-top:6px"><strong>Outlook</strong></div>' +
+        days.map(x => `<div class="row dim">${escapeHtml(x.day || '')}: ${x.high_c}/${x.low_c}°C — ${escapeHtml(x.text || '')}</div>`).join('');
+    }
+
+    let dengueHtml = '<h3>Dengue / aedes</h3>';
+    dengueHtml += `<div class="row">${d.clusters_active_total != null ? d.clusters_active_total : 0} active cluster polygons nationally</div>`;
+    dengueHtml += near.length
+      ? near.map(n => `<div class="row">• ${escapeHtml(n.locality || '?')}: ${n.case_size} cases, ${n.km} km (updated ${escapeHtml(n.updated || '?')})</div>`).join('')
+      : '<div class="row dim">• none within 3 km</div>';
+    if (d.aedes_areas_total != null) dengueHtml += `<div class="row">High-Aedes areas: ${d.aedes_areas_total} total; clinic inside: ${d.in_high_aedes_area ? 'YES' : 'no'}</div>`;
+
+    let widbHtml = '<h3>Infectious diseases (WIDB, national)</h3>';
+    if (dw.epi_week) {
+      widbHtml += `<div class="row"><strong>${escapeHtml(dw.epi_week)}</strong> ${escapeHtml(dw.date_range || '')} — CDA weekly bulletin</div>`;
+      if (dwD.week != null) {
+        widbHtml += `<div class="row">Dengue: ${dwD.week} this week (prev ${dwD.prev_week != null ? dwD.prev_week : '—'}, 5-yr same-wk median ${dwD.median_5yr != null ? dwD.median_5yr : '—'})</div>`;
+        if (dwD.cum != null) widbHtml += `<div class="row dim">YTD: ${dwD.cum} (2025 same period: ${dwD.cum_prev != null ? dwD.cum_prev : '—'})</div>`;
+        if (dwD.hospital_admissions != null) widbHtml += `<div class="row dim">${dwD.hospital_admissions} hospital admissions this week${dwD.notifications != null ? ' · ' + dwD.notifications + ' notifications' : ''}</div>`;
+      }
+      const flu = dw.influenza || {};
+      if (flu.ili_positivity_pct != null) {
+        let fluLine = 'Influenza: ILI positivity ' + flu.ili_positivity_pct + '% (n=' + (flu.ili_samples != null ? flu.ili_samples : '?') + ')';
+        if (flu.types_pct) fluLine += ' — ' + Object.entries(flu.types_pct).map(([t, p]) => escapeHtml(t) + ' ' + p + '%').join(', ');
+        widbHtml += `<div class="row">${fluLine}</div>`;
+      }
+      const ari = dw.ari || {};
+      if (ari.polyclinic_attendances != null) {
+        let ariLine = 'ARI polyclinic attendances ' + ari.polyclinic_attendances + '/day';
+        const ariRow = (dw.other || {})['Acute Upper Respiratory Infections'] || {};
+        if (ariRow.median_5yr != null) ariLine += ' (5-yr same-wk median ' + ariRow.median_5yr + ')';
+        if (ari.covid_positivity_pct != null) ariLine += ' · COVID-19 ARI positivity ' + ari.covid_positivity_pct + '%';
+        widbHtml += `<div class="row">${escapeHtml(ariLine)}</div>`;
+      }
+      if (dw.url) widbHtml += `<div class="row dim"><a href="${escapeHtml(dw.url)}" target="_blank" rel="noopener">Bulletin PDF</a></div>`;
+    } else {
+      widbHtml += '<div class="row dim">unavailable (see data gaps)</div>';
+    }
+
+    let uraHtml = '<h3>Planning decisions (URA, island-wide)</h3>';
+    if (cc.healthcare_decisions_90d_count != null) {
+      uraHtml += `<div class="row dim">${escapeHtml(cc.window || '')} — ${cc.rows_scanned != null ? cc.rows_scanned : '?'} written permissions scanned</div>`;
+      const hcd = cc.healthcare_decisions_90d || [];
+      uraHtml += hcd.length
+        ? hcd.map(a => `<div class="row">• ${escapeHtml(a.date || '?')}: ${escapeHtml(a.address || '?')} — ${escapeHtml((a.what || '?').slice(0, 90))}${a.decision_type ? ' <span class="dim">[' + escapeHtml(a.decision_type) + ']</span>' : ''}</div>`).join('')
+        : '<div class="row dim">• no healthcare-related decisions in window</div>';
+      uraHtml += `<div class="row dim">${escapeHtml(cc.caveat || 'planning permission ≠ opened facility')}</div>`;
+    } else uraHtml += '<div class="row dim">unavailable (see data gaps)</div>';
+
+    let miscHtml = '<h3>Data quality</h3>';
+    const gaps = snap.data_gaps || [];
+    miscHtml += gaps.length
+      ? '<div class="ctx-gaps">' + gaps.map(g => `<div class="row">• ${escapeHtml(g)}</div>`).join('') + '</div>'
+      : '<div class="row ctx-ok">All sources OK — no data gaps.</div>';
+    if (snap.nearest_services && (snap.nearest_services.pyclinics || []).length) {
+      miscHtml += '<h3 style="margin-top:8px">Nearest polyclinics</h3>' +
+        snap.nearest_services.pyclinics.map(p =>
+          `<div class="row">• ${escapeHtml(p.name || '')} (${escapeHtml(p.postcode || '')}) — ${p.km} km</div>`).join('');
+    }
+    miscHtml += `<div class="row dim" style="margin-top:6px">Clinic: ${escapeHtml(c.name || '')} · NEA region ~${escapeHtml(c.nea_region_approx || '?')}${c.town ? ' · town ~' + escapeHtml(c.town) : ''}</div>`;
+
+    let protosHtml = `<h3>Active protocol links (${active.length} signal${active.length === 1 ? '' : 's'} of ${(pl.corpus || []).length} corpus protocols)</h3>`;
+    const BASIS_LABEL = {
+      corpus: 'in protocol text',
+      partial: 'partial: mechanism in text',
+      derived: 'derived: not protocol text',
+      none: 'counselling only'
+    };
+    protosHtml += active.length
+      ? active.map(l => {
+          const b = BASIS_LABEL[l.basis] ? l.basis : 'derived';
+          return `<div class="row"><strong>${escapeHtml(l.signal || '')}</strong>: ${escapeHtml(l.detail || '')}
+            <span class="ctx-basis b-${b}" title="${escapeHtml(l.basis_note || '')}">${BASIS_LABEL[b]}</span></div>
+           <div class="ctx-protos">${(l.protocols || []).map(p => `<span class="ctx-proto">${escapeHtml(p)}</span>`).join('')}</div>`
+           + (l.population_counselling ? `<div class="ctx-counsel">Counsel: ${escapeHtml(l.population_counselling)}</div>` : '');
+        }).join('')
+      : '<div class="row dim">No elevated signals — all context signals within normal range.</div>';
+    if (active.length) {
+      protosHtml += '<div class="ctx-legend">Basis badge = provenance of the link — '
+        + '<span class="ctx-basis b-corpus">in protocol text</span> may be cited as protocol content; '
+        + '<span class="ctx-basis b-partial">partial</span> mechanism in text, trigger not; '
+        + '<span class="ctx-basis b-derived">derived</span> clinical synthesis — present as local context only; '
+        + '<span class="ctx-basis b-none">counselling only</span> no clinical claim. '
+        + 'Hover a badge for the audit note.</div>';
+    }
+
+    ctxCards.innerHTML =
+      `<div class="ctx-card ctx-wide">${protosHtml}</div>`
+      + `<div class="ctx-card">${airHtml}</div>`
+      + `<div class="ctx-card">${weatherHtml}</div>`
+      + `<div class="ctx-card">${dengueHtml}</div>`
+      + `<div class="ctx-card">${widbHtml}</div>`
+      + `<div class="ctx-card">${uraHtml}</div>`
+      + `<div class="ctx-card">${miscHtml}</div>`;
+    renderBriefTiles(snap);
+    renderSpotlight(snap);
+  }
+
+  function gapFor(snap, prefixes) {
+    return (snap.data_gaps || []).find(g => prefixes.some(p => g.startsWith(p)));
+  }
+  function tileHtml(title, cls, value, sub) {
+    return `<div class="tile ${cls}"><div class="t">${title}</div>`
+      + `<div class="v">${value}</div><div class="s">${sub || ''}</div></div>`;
+  }
+  function renderBriefTiles(snap) {
+    const el = document.getElementById('brief-tiles');
+    const c = (snap.meta || {}).clinic || {};
+    const aq = snap.air_quality || {}, w = snap.weather || {}, d = snap.dengue || {};
+    const dw = snap.disease_week || {}, cc = snap.catchment_change || {}, ns = snap.nearest_services || {};
+    if (c.name) document.getElementById('brief-title').textContent = 'Brief — ' + c.name;
+    const gap = g => gapFor(snap, g);
+    let tiles = '';
+    // Air (PSI) — good ≤50 · warn 51–100 · bad >100
+    const airGap = gap(['psi', 'pm25']);
+    if (airGap) tiles += tileHtml('Air', 'warn', 'unavailable', escapeHtml(airGap));
+    else if (aq.psi && aq.psi.peak != null) {
+      const cls = aq.psi.peak > 100 ? 'bad' : (aq.psi.peak >= 51 ? 'warn' : 'good');
+      const sub = (aq.psi.peak_region || '')
+        + ((aq.pm25 && aq.pm25.peak != null) ? ' · PM2.5 ' + aq.pm25.peak.toFixed(0) : '');
+      tiles += tileHtml('Air (PSI)', cls, String(aq.psi.peak), escapeHtml(sub));
+    } else tiles += tileHtml('Air', '', 'no signal', 'PSI unavailable');
+    // Weather — warn if a flood alert is present, else good
+    const wGap = gap(['forecast_24hr', 'wbgt', 'flood_alerts', 'outlook_4day']);
+    if (wGap) tiles += tileHtml('Weather', 'warn', 'unavailable', escapeHtml(wGap));
+    else if (w.today) {
+      const nFlood = (w.flood && (w.flood.active_alerts || []).length) || 0;
+      const cls = nFlood ? 'warn' : 'good';
+      const sub = w.town_2hr
+        ? escapeHtml(w.town_2hr.town || '') + ' 2hr: ' + escapeHtml(w.town_2hr.forecast || '')
+        : escapeHtml(w.today.text || '');
+      tiles += tileHtml('Weather', cls, w.today.high_c + '°/' + w.today.low_c + '°' + (nFlood ? ' ⚠' : ''), sub);
+    } else tiles += tileHtml('Weather', '', 'no signal', 'forecast unavailable');
+    // Dengue nearby — bad if any nearby cluster ≥3 cases · warn if high-aedes
+    // or a small nearby cluster · good otherwise
+    const dGap = gap(['dengue_clusters', 'aedes_areas']);
+    const near = d.nearby_clusters || [];
+    if (dGap) tiles += tileHtml('Dengue nearby', 'warn', 'unavailable', escapeHtml(dGap));
+    else if (near.some(x => (x.case_size || 0) >= 3))
+      tiles += tileHtml('Dengue nearby', 'bad', Math.max(...near.map(x => x.case_size || 0)) + ' cases',
+        escapeHtml(near[0].locality || '') + ' ' + near[0].km + ' km');
+    else if (near.length || d.in_high_aedes_area)
+      tiles += tileHtml('Dengue nearby', 'warn',
+        near.length ? (near[0].case_size || 0) + ' cases' : 'no nearby clusters',
+        (d.in_high_aedes_area ? 'high aedes area' : escapeHtml(near[0].locality || ''))
+          + (d.clusters_active_total != null ? ' · ' + d.clusters_active_total + ' active island-wide' : ''));
+    else tiles += tileHtml('Dengue nearby', 'good', 'no clusters',
+      d.clusters_active_total != null ? d.clusters_active_total + ' active island-wide' : '');
+    // WIDB week — bad if week > 1.5×5-yr median · warn if > median · else neutral
+    const wdGap = gap(['widb']);
+    const dwD = dw.dengue || {}, flu = (dw.influenza || {}).ili_positivity_pct;
+    if (wdGap) tiles += tileHtml('WIDB week', 'warn', 'unavailable', escapeHtml(wdGap));
+    else if (dwD.week != null) {
+      let cls = '';
+      if (dwD.median_5yr != null) cls = dwD.week > 1.5 * dwD.median_5yr ? 'bad'
+        : (dwD.week > dwD.median_5yr ? 'warn' : 'good');
+      const sub = (dw.epi_week || '') + (dwD.median_5yr != null ? ' · 5yr median ' + dwD.median_5yr : '')
+        + (flu != null ? ' · flu ILI ' + flu + '%' : '');
+      tiles += tileHtml('WIDB week', cls, dwD.week + ' dengue cases', escapeHtml(sub));
+    } else tiles += tileHtml('WIDB week', '', 'no signal', 'bulletin unavailable');
+    // Planning 90d — informational; sub-line: permission ≠ opened facility
+    const pGap = gap(['ura']);
+    if (pGap) tiles += tileHtml('Planning 90d', 'warn', 'unavailable', escapeHtml(pGap));
+    else if (cc.healthcare_decisions_90d_count != null)
+      tiles += tileHtml('Planning 90d', '', cc.healthcare_decisions_90d_count + ' decisions',
+        'permission ≠ opened facility');
+    else tiles += tileHtml('Planning 90d', '', 'no signal', 'URA unavailable');
+    // Nearest polyclinic — neutral: name + km
+    const nGap = gap(['polyclinics']);
+    const py = (ns.pyclinics || [])[0];
+    if (nGap) tiles += tileHtml('Nearest polyclinic', 'warn', 'unavailable', escapeHtml(nGap));
+    else if (py) tiles += tileHtml('Nearest polyclinic', '', py.km + ' km', escapeHtml(py.name || ''));
+    else tiles += tileHtml('Nearest polyclinic', '', 'no data', '');
+    el.innerHTML = tiles;
+  }
+
+  const SPOT_BASIS = {
+    corpus: 'in protocol text', partial: 'partial: mechanism in text',
+    derived: 'derived: not protocol text', none: 'counselling only'
+  };
+  function renderSpotlight(snap) {
+    const el = document.getElementById('brief-spotlight');
+    if (!el || !snap) return;
+    const active = ((snap.protocol_links || {}).active) || [];
+    el.innerHTML = active.length
+      ? active.map(l => {
+          const b = SPOT_BASIS[l.basis] ? l.basis : 'derived';
+          return `<div class="watch-card"><div class="f">${escapeHtml(l.signal || '')}</div>`
+            + `<div class="w">${escapeHtml(l.detail || '')} `
+            + `<span class="ctx-basis b-${b}" title="${escapeHtml(l.basis_note || '')}">${SPOT_BASIS[b]}</span></div>`
+            + `<div class="ctx-protos">${(l.protocols || []).map(p =>
+                `<span class="ctx-proto">${escapeHtml(p)}</span>`).join('')}</div>`
+            + (l.population_counselling
+                ? `<div class="a">Counsel: ${escapeHtml(l.population_counselling)}</div>` : '')
+            + '</div>';
+        }).join('')
+      : '<div class="spot-empty">No elevated signals — all context signals within normal range.</div>';
+  }
+
+  async function loadBrief() {
+    try {
+      const qs = new URLSearchParams(ctxQuery).toString();
+      const res = await fetch('/api/brief' + (qs ? '?' + qs : ''));
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      brief.data = d;
+      renderBrief(d);
+    } catch (e) {
+      const err = document.getElementById('brief-error');
+      err.hidden = false;
+      err.textContent = 'Brief status unavailable: ' + (e.message || e);
+    }
+  }
+
+  function renderBrief(d) {
+    const errEl = document.getElementById('brief-error');
+    const btn = document.getElementById('brief-generate');
+    const stamp = document.getElementById('brief-stamp');
+    errEl.hidden = true;
+    if (d.last_error) { errEl.hidden = false; errEl.textContent = 'Last generation failed: ' + d.last_error; }
+    if (d.status === 'fresh') { btn.textContent = 'Regenerate (costs 1 LLM call)'; btn.dataset.force = '1'; }
+    else { btn.textContent = 'Generate Brief'; btn.dataset.force = '0'; }
+    if (d.as_of) stamp.textContent = 'brief as of ' + new Date(d.as_of).toLocaleString();
+
+    const c = document.getElementById('brief-content');
+    const b = d.brief;
+    if (!b) {
+      c.innerHTML = '<div class="empty-state" style="flex:none;padding:12px 0"><p>'
+        + 'No brief yet — the tiles above are live data. Generate Brief adds the inference '
+        + 'layer (1 LLM call, 0 embeddings, cached 15 min).</p></div>';
+      return;
+    }
+    const drops = d.provenance_drops || 0;
+    const gaps = (lastSnap && lastSnap.data_gaps) ? lastSnap.data_gaps : [];
+    let html = '<div class="brief-headline">' + escapeHtml(b.headline || '') + '</div>';
+    if (b.parse_error) {   // degraded: unparseable LLM output → labelled prose
+      html += '<div class="brief-section-title">Watch today</div>'
+        + '<div class="brief-prose">' + escapeHtml(b.raw || '') + '</div>'
+        + '<div class="brief-footer">Unstructured model output — shown as-is (JSON parse failed).</div>';
+      c.innerHTML = html;
+      renderSpotlight(lastSnap);
+      return;
+    }
+    html += '<div class="brief-section-title">Watch today</div>';
+    if (!b.watch.length) html += '<div class="watch-card"><div class="w">No AI items passed the '
+      + 'provenance check — see the tiles and Protocol spotlight above.</div></div>';
+    html += b.watch.map(it =>
+      `<div class="watch-card src-${SRC_CLASS[it.source] || ''}">`
+      + `<div class="f">${escapeHtml(it.finding)}</div>`
+      + `<div class="w">${escapeHtml(it.why_it_matters)}</div>`
+      + `<div class="a"><b>Action:</b> ${escapeHtml(it.action)}</div>`
+      + `<span class="brief-src">${escapeHtml(it.source || 'derived')}</span></div>`).join('');
+    html += '<div class="brief-section-title">Protocol spotlight</div><div id="brief-spotlight"></div>';
+    if (b.outlook) html += '<div class="brief-section-title">Outlook</div>'
+      + '<div class="brief-outlook">' + escapeHtml(b.outlook) + '</div>';
+    html += '<div class="brief-footer">'
+      + (gaps.length ? 'Data gaps: ' + gaps.map(escapeHtml).join(' · ') : 'All sources OK')
+      + (drops ? ' · ' + drops + ' watch item(s) withheld by the provenance check' : '')
+      + '<br>Generated from live data ' + (d.as_of || '')
+      + ' · 1 LLM call (≤2 provider round-trips, 0 embeddings) · cached 15 min</div>';
+    c.innerHTML = html;
+    renderSpotlight(lastSnap);
+  }
+
+  async function generateBrief() {
+    if (brief.generating) return;               // double-click guard (client side)
+    brief.generating = true;
+    const btn = document.getElementById('brief-generate');
+    const prog = document.getElementById('brief-progress');
+    const force = btn.dataset.force === '1';
+    btn.disabled = true;
+    const t0 = Date.now();
+    prog.textContent = 'Fetching live data… 0s';
+    const timer = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      prog.textContent = (s < 15 ? 'Fetching live data… ' : 'Writing brief… ') + s + 's';
+    }, 1000);
+    try {
+      const qs = new URLSearchParams(ctxQuery).toString();
+      const res = await fetch('/api/brief/generate' + (qs ? '?' + qs + '&' : '?')
+        + 'force=' + (force ? 1 : 0), { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      renderBrief({ status: 'fresh', last_error: null, as_of: d.as_of,
+                    brief: d.brief, provenance_drops: d.provenance_drops || 0 });
+    } catch (e) {
+      const err = document.getElementById('brief-error');
+      err.hidden = false;
+      err.textContent = 'Generate failed: ' + (e.message || e);
+    } finally {
+      clearInterval(timer);
+      btn.disabled = false;
+      brief.generating = false;
+      prog.textContent = '';
+    }
+  }
+
+  function toggleCtx() {
+    const hidden = ctxDetail.classList.toggle('hidden');
+    ctxToggle.textContent = hidden ? 'Raw context data ▸' : 'Raw context data ▾';
+    ctxToggle.setAttribute('aria-expanded', String(!hidden));
+  }
+
+  function updateCtxLocation() {
+    const pc = document.getElementById('ctx-pc').value.trim();
+    const lat = parseFloat(document.getElementById('ctx-lat').value);
+    const lon = parseFloat(document.getElementById('ctx-lon').value);
+    const q = {};
+    if (isFinite(lat) && isFinite(lon)) { q.lat = lat; q.lon = lon; }
+    else if (pc) q.postcode = pc;
+    ctxQuery = q;
+    refreshContext();
+    loadBrief();
+  }
+
+  function resetCtxLocation() {
+    document.getElementById('ctx-pc').value = '';
+    document.getElementById('ctx-lat').value = '';
+    document.getElementById('ctx-lon').value = '';
+    ctxQuery = {};
+    refreshContext();
+    loadBrief();
+  }
+
+  checkStatus();
+  refreshContext();
+  applyTab(currentTab());
+  setInterval(refreshContext, CTX_REFRESH_MS);
+  // Re-poll status while not ready (e.g. server restarted mid-session):
+  // without this, a failed first probe leaves the send button disabled.
+  setInterval(() => { if (statusBadge.className !== 'ready') checkStatus(); }, 10000);
 </script>
 </body>
 </html>
