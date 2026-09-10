@@ -701,13 +701,23 @@ def _active_protocol_names(context_provider) -> list:
 # calendar chunks for community questions (2026-09-10: the raw question ranked
 # the Redhill calendar #1; the same question through the steered retriever
 # returned zero community chunks). Deliberately narrow — a clinical question
-# that merely mentions "exercise"/"activities" (e.g. cardiac rehab) keeps its
-# steering; only explicit community-programme phrasing skips it.
+# that merely mentions "exercise" (e.g. cardiac rehab) keeps its steering;
+# only explicit community-programme phrasing skips it.
+#
+# 2026-09-10 (2): the original pattern put ONE trailing \b on the whole group,
+# which silently disabled every prefix alternative — "activit\b" never matched
+# "activity/activities" and "communit\b" never matched "community/communities",
+# so the commonest community phrasings fell through to steering and the model
+# answered "I don't know" (empty Community resources section). Boundaries are
+# now per-alternative (full-word alternatives keep \b, prefix alternatives
+# don't) and common phrasings were added: AACC/AAC, ageing/aging centre,
+# calendar, leisure.
 _COMMUNITY_INTENT_RE = re.compile(
-    r"\b(ntuc|active[- ]age|communit|programmes?|programs?|activit|workshops?|"
-    r"classes?|volunteer|day ?care|dinner|digital skills?|seniors?|"
-    r"older (people|adults|persons)|social (activities?|support|engagement))\b",
-    re.IGNORECASE)
+    r"\b(ntuc\b|aaccs?\b|aacs?\b|active[- ]?age|ag(?:e?|ei?)ng centres?|"
+    r"communit|programmes?\b|programs?\b|activit|workshops?\b|classes?\b|"
+    r"volunteer|day ?care|dinner|digital skills|seniors?\b|"
+    r"older (people|adults|persons)|social (activities?|support|engagement)|"
+    r"leisure\b|calendar\b)", re.IGNORECASE)
 
 
 def _steer_query(question: str, context_provider) -> str:
@@ -791,6 +801,28 @@ def build_chain(vectorstore: Chroma, context_provider=None):
     # prompt well under the context window (~15k chars) while covering a
     # guideline's relevant section.
     retriever = vectorstore.as_retriever(search_kwargs={"k": 12})
+    # Phase 7 (2026-09-10): community-intent questions ALSO run a second
+    # retrieval scoped to the NTUC calendar chunks (COMMUNITY_SITES) and merge
+    # up to 4 of them in. Skipping steering alone is necessary but not
+    # sufficient: calendar-worded questions ("What programmes do the AACs
+    # offer?") pull calendars into the top-12 naturally, but phrasings like
+    # "What does the AACC near our clinic provide?" embed closer to the
+    # primarycarepages partner page + protocol chunks and fill all 12 slots
+    # with non-calendar material — the model then answers with the generic
+    # AAC role (ABC/2Ss) and zero specific programme names.
+    community_retriever = vectorstore.as_retriever(search_kwargs={
+        "k": 4, "filter": {"source_site": {"$in": sorted(COMMUNITY_SITES)}}})
+
+    def _retrieve(q: str) -> list:
+        docs = list(retriever.invoke(_steer_query(q, context_provider)))
+        if _COMMUNITY_INTENT_RE.search(q or ""):
+            seen = {d.page_content for d in docs}
+            for d in community_retriever.invoke(q):
+                if d.page_content not in seen:
+                    seen.add(d.page_content)
+                    docs.append(d)
+        return docs[:16]
+
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
 
     def _run(state: dict) -> dict:
@@ -804,8 +836,7 @@ def build_chain(vectorstore: Chroma, context_provider=None):
 
     return (
         RunnableParallel({
-            "context": (RunnableLambda(lambda q: _steer_query(q, context_provider))
-                        | retriever),
+            "context": RunnableLambda(_retrieve),
             "question": RunnablePassthrough(),
         })
         | RunnableLambda(_run)

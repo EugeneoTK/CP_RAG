@@ -64,20 +64,79 @@ Active Ageing Programmes card for NTUC centres within 2 km):
   - Full `python -m context` build + `GET /api/context` live: see
     /tmp/ctx_build_p9.log and docs/signal-research.md §19.
 
+## Done this session (continued — misleading-tile fix)
+
+User flagged the **New health facilities (3 mo)** tile as "utterly
+misleading": the sub-line mixed a distance filter ("1 near (~2 km)")
+with island-wide category counts and gave no idea WHERE the 5 senior
+care were. Verified against the live cache: the 1 near row is 182 Jalan
+Jurong Kechil (child care, ~1.2 km) — ZERO senior care within 2 km; the
+3 listed senior-care rows are Tampines (~25 km) + 2 unmapped streets
+(Joo Seng Rd, Ang Mo Kio Ave 3), and 2 of the 5 senior-care rows are
+not visible in the UI at all (50-row list cap vs 67 counted).
+- `context/snapshot.py::_enrich_ura`: now also emits
+  `nearest_km_by_category` — min `approx_km` per category over MAPPED
+  rows only (a category with no mapped rows gets no entry; a distance
+  is never invented).
+- `static/index.html` tile: each category bit gains `(nearest ~X km)`
+  (clinic/medical bit = min over Clinic+Medical+Other buckets). Live
+  sub-line now: "1 near (~2 km) · 5 senior care (nearest ~25 km) ·
+  6 nursing home (nearest ~19.9 km) · 12 child care (nearest 1.2 km) ·
+  41 clinic/medical (nearest ~13.4 km) · 3 polyclinic (nearest ~3.5 km)".
+- `CLAUDE.md` context-layer bullet lists the new key.
+- Gates: `_enrich_ura` run against the live `ura_planning_v2.json`
+  cache (assertions: SC nearest = min over mapped SC rows;
+  `near_clinic_count` unchanged = 1); `node --check` on the page JS OK.
+
+## Done this session (continued — community programme retrieval fix)
+
+User asked the chat for Active Ageing Centre programmes and got no
+specifics. Ingestion was fine (386 Sep-2026 calendar chunks in the
+corpus, specific programme names present — verified in-store). Two
+retrieval bugs in `rag.py`:
+- **`_COMMUNITY_INTENT_RE` boundary bug**: one trailing `\b` on the whole
+  group silently disabled every prefix alternative — `activit\b` never
+  matched "activity/activities", `communit\b` never matched
+  "community/communities". The commonest community phrasings fell
+  through to protocol steering, the 386 calendar chunks were crowded
+  out of the k=12 top, the model saw an EMPTY Community resources
+  section and answered "I don't know". Fix: per-alternative boundaries
+  (full-word alternatives keep `\b`, prefix alternatives don't) + added
+  AACC/AAC, ageing/aging centre, calendar, leisure. Verified: 11/11
+  community phrasings match, 5/5 clinical phrasings don't
+  (`/tmp/cp_rag_regex_check.py`).
+- **Skipping steering was necessary but not sufficient**:
+  "What does the AACC near our clinic provide?" embeds closer to the
+  primarycarepages partner page + protocol chunks — all 12 slots
+  non-calendar, model answered the generic AAC role (ABC/2Ss) with zero
+  programme names. Fix: `build_chain` now runs a second retrieval
+  scoped to `COMMUNITY_SITES` (`$in` filter, k=4) for community-intent
+  questions and merges up to 4 calendar chunks (deduped by content,
+  total capped at 16).
+- Gates: `py_compile` OK; server restarted (now PID 27565) and
+  e2e-verified live — "What does the AACC near our clinic provide?"
+  now retrieves NTUC calendar chunks (Kampung Admiralty, Telok
+  Blangah 2026-09) and the answer names specific programmes (Kpop,
+  Qigong, Pilates, Zumba, walking football, ukulele, 3D printing
+  workshop, TCM Mobile Clinic). Clinical regression check:
+  "How do I manage hypertension in an 80-year-old?" still retrieves
+  ACG + protocol chunks with steering active, no community chunks.
+- Known soft spot: ~186 of the 386 calendar chunks contain PDF
+  cover-page/design-template noise (Pantone swatches, "Housekeeping")
+  from the NTUC template pages — the model tolerates it, but a cleaner
+  parse (skip template pages in `ingest_community_refresh`) is a
+  candidate improvement at the next monthly refresh.
+
 ## Outstanding
 
-1. **Uncommitted work (user's call — prior sessions deliberately left
-   commits to the user):** all Phase 7/8 files still uncommitted (HEAD =
-   origin/main = `33fe8f9`) PLUS Phase 9: `context/community.py`
-   (NEW/untracked) and re-touches of `context/config.py`,
-   `context/snapshot.py`, `context/prompts.py`, `context/brief.py`,
-   `context/__main__.py`, `static/index.html`, `CLAUDE.md`,
-   `docs/signal-research.md`, `HANDOFF.md`. Suggested commits so far:
-   `feat: runtime chat-model provider toggle (OpenRouter | local vLLM)`,
-   `fix: disable vLLM Qwen3 thinking mode for local provider`,
-   `feat: NTUC community calendars (Phase 7)`, `feat: URA planning zoom —
-   categories, street-area heuristic, polyclinic tile removed (Phase 8)`,
-   now `feat: 2 km catchment + Active Ageing card (Phase 9)`.
+1. **Uncommitted work (user's call — commits left to the user):**
+   Phases 7–9 + provider toggle were committed and PUSHED as `b4b0a7a`
+   (2026-09-10). Now uncommitted: the per-category nearest tile fix —
+   `context/snapshot.py`, `static/index.html`, `CLAUDE.md` — plus the
+   community-programme retrieval fix — `rag.py` (this session).
+   Suggested commits: `feat: per-category nearest distance on New health
+   facilities tile (nearest_km_by_category)` and `fix: community-intent
+   gate + calendar quota for NTUC programme questions (rag.py)`.
 2. **Provider does not survive restart**: runtime state is in-memory;
    boot default is `openrouter`. Server restarted this session; if it
    came back on `openrouter`, re-set local with `POST /api/provider`
@@ -95,12 +154,28 @@ Active Ageing Programmes card for NTUC centres within 2 km):
    SAME landing page, so it always reflects the published month.
 5. **URA street-hint coverage is partial by design** (19/50 listed rows
    mapped at Phase 8 build time; the 2 km band is stricter, so expect
-   fewer near rows). Extend `config.STREET_AREA_HINTS` when a recurring
-   unmapped street matters.
+   fewer near rows). Consequence: `near_clinic_count` AND
+   `nearest_km_by_category` are LOWER BOUNDS — unmapped addresses
+   silently drop out of both, and distances are to the area CENTROID,
+   not the facility (±km either way). Extend `config.STREET_AREA_HINTS`
+   when a recurring unmapped street matters.
 6. **NTUC centre table is static** (verified 2026-09-10). A new centre
    appears in the card with "(no coordinates on file)" and no km — add
    it to `config.ACTIVE_AGING_CENTRES` (positions are in the locations
    page flight payload).
+7. **Tile counts 67, drill-down lists 50** (demo gotcha): the tile's
+   "N approvals" + category counts span ALL 67 in-window URA rows, but
+   the raw-context "Planning decisions" list is capped at
+   `URA_MAX_ITEMS = 50` with no "showing 50 of 67" note — 2 of the 5
+   senior-care rows are invisible in the UI. If the user drills down
+   and counts 3 senior care vs the tile's 5, that's why. Fix options:
+   raise the cap or annotate the card.
+8. **"67 approvals" headline + hidden caveat**: "permission ≠ opened
+   facility" renders on the tile only when the category list is empty
+   (basically never) — the caveat lives in the drill-down. Remaining
+   options from the 2026-09-10 critique (per-category nearest shipped):
+   restructure the sub-line to separate the distance signal from the
+   category signals, and/or rename "approvals" → "permissions".
 
 ## Next-session prompt
 
@@ -116,7 +191,8 @@ idempotent, guarded)** in Chroma (`chroma_db/` — expensive, don't rebuild).
 Live local-context signals (NEA air, DENGBURDEN dengue, MOM heat, CDA
 disease_week, **URA planning — Phase 8: per-row `category`,
 `category_counts`, decision-date-window re-filter with `stale_dropped`,
-street-name `district`/`approx_km`/`distance_band`/`near_clinic_count`,
+street-name `district`/`approx_km`/`distance_band`/`near_clinic_count`
++ `nearest_km_by_category` (per-category nearest ~km on the tile),
 cache `ura_planning_v2.json`; Phase 9: near band 10 → 2 km, tile renamed
 `New health facilities (3 mo)`**) via the key-free `context/` package;
 Phase 6 clinician-brief dashboard (Brief default: **6 KPI tiles — Nearest
@@ -136,14 +212,19 @@ typo; free). Local calls disable Qwen3 thinking via
 `extra_body={"chat_template_kwargs":{"enable_thinking": false}}` in
 `rag.py make_chat_llm()` (`LOCAL_DISABLE_THINKING=0` re-enables).
 Retrieval: k=12 with `_steer_query()` protocol-name steering for the
-retriever only; community-intent questions skip steering
-(`_COMMUNITY_INTENT_RE`) so calendar chunks are not crowded out. Current
-state: HEAD = origin/main = `33fe8f9` with all Phase 7/8/9 work
-uncommitted (provider toggle + thinking fix + Phase 7 calendars +
-Phase 8 URA zoom + Phase 9 2 km band/Active Ageing card, all
-live-verified; `context/community.py` untracked); server restarted
-this session (provider may be back on `openrouter`); URA v2 cache and
-`ntuc_ageing_v1.json` hold real fetches (2026-09-10). Do next: review
-the uncommitted diff and commit it (user's call; suggested commits
-above), then optionally pin `CHAT_PROVIDER` in `.env`. Golden rules in
-`CLAUDE.md` (read it first).
+retriever only; community-intent questions (`_COMMUNITY_INTENT_RE`) skip
+steering AND get a second retrieval scoped to the NTUC calendar chunks
+(up to 4 merged, total capped at 16) so specific programmes survive —
+see "Done this session (continued — community programme retrieval fix)".
+Current state: HEAD = origin/main = `b4b0a7a` (Phases 7–9 + provider
+toggle committed and pushed 2026-09-10); uncommitted = per-category
+nearest tile fix (`context/snapshot.py`, `static/index.html`,
+`CLAUDE.md`) + community programme retrieval fix (`rag.py`); all
+live-verified; tile's known soft spots in Outstanding #5–#8. Server
+restarted 2026-09-10 for the user's demo (now PID 27565, uvicorn
+127.0.0.1:5001, log /tmp/cp_rag_uvicorn.log; provider is in-memory, so
+it is back on `openrouter` after the restart — re-set with
+`POST /api/provider` if the demo needs local/free). URA v2 cache and
+`ntuc_ageing_v1.json` hold real fetches (2026-09-10). Do next: commit
+the tile fix + rag.py fix (user's call), then optionally pin
+`CHAT_PROVIDER` in `.env`. Golden rules in `CLAUDE.md` (read it first).
