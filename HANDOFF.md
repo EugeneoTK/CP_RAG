@@ -38,7 +38,7 @@ Root cause: brief generation hit the provider's default `max_tokens` cap → JSO
 - User reviewed the SGDS UI live and preferred the original look. Reverted: `git checkout ce43834 -- static/index.html` (the pre-SGDS single self-contained 1203-line file — blue `#1a56db` header, Brief/Chat/Library tabs, hand-rolled CSS/JS, no external assets) + `git rm static/sgds-utility.css` (existed only for the SGDS build).
 - Only SGDS-era carry-over kept: the inline SVG data-URI favicon (invisible; kills the `/favicon.ico` 404) — recolored its tile from `#2563eb` to the design blue `#1a56db` to match the header.
 - `app.py` untouched: the `@app.get("/")` `FileResponse` route takes precedence, so the catch-all `StaticFiles` mount from `f626a07` stays — harmless and future-proofs any root-relative asset.
-- Note: the "Clinical Flight Bag" tab rename was part of `f626a07`, so the restored UI shows the original **"Chat"** label — expected, not a regression.
+- Note: the "Clinical Flight Bag" tab rename was part of `f626a07` — re-applied at the user's request on top of the restored design (tab button text only; hash routing still uses `data-tab="chat"`). Re-validated 23/23 static + 25/25 live after the rename.
 - Validated with a fresh harness `/tmp/sgds-verify/verify_revert.mjs` (puppeteer-core; `VERIFY_BASE` overridable, `VERIFY_LIVE=1` for backend mode): **23/23** static-mode (incl. expected API-down degradation: Offline badge + brief-error banner, only-/api/ 404s) and **25/25** live on 5001 (Ready badge, 6 KPI tiles, real context chips, tab switching, zero 404s / console / page errors). Screenshots: `/tmp/sgds-verify/revert-*.png`.
 - The SGDS commit `f626a07` remains in git history if the design is ever wanted back.
 
