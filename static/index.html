@@ -481,6 +481,35 @@
     .brief-footer { font-size: 0.72rem; color: #64748b; margin-top: 12px; line-height: 1.5; }
     .spot-empty { font-size: 0.85rem; color: #16a34a; }
 
+    /* --- chat feedback (Ecosystem Insights) --------------------------------- */
+    .msg-rating { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+    .msg-rating button { font-size: 0.75rem; padding: 2px 10px; border-radius: 999px;
+      border: 1px solid #cbd5e1; background: #fff; color: #475569; cursor: pointer; }
+    .msg-rating button:hover { background: #f1f5f9; }
+    .msg-rating button.chosen { background: #1a56db; border-color: #1a56db; color: #fff; }
+    .msg-rating .tag-pick { display: inline-flex; gap: 4px; }
+    .msg-rating .tag-pick button { font-size: 0.7rem; padding: 2px 8px; }
+
+    /* --- Ecosystem Insights view --------------------------------------------- */
+    #view-insights { overflow-y: auto; gap: 12px; }
+    #insight-head { display: flex; flex-direction: column; gap: 4px; }
+    .insight-title { font-size: 1.05rem; font-weight: 600; }
+    .insight-sub { font-size: 0.78rem; color: #64748b; line-height: 1.5; max-width: 720px; }
+    .insight-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+      padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .insight-card h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: #64748b; margin-bottom: 8px; }
+    .insight-row { display: flex; justify-content: space-between; gap: 8px;
+      font-size: 0.85rem; padding: 4px 0; border-bottom: 1px solid #f1f5f9; }
+    .insight-row:last-child { border-bottom: none; }
+    .insight-row .n { color: #64748b; font-variant-numeric: tabular-nums; flex: none; }
+    .insight-gap .insight-row .q { color: #92400e; }
+    .insight-tag { font-size: 0.68rem; background: #fef3c7; color: #92400e;
+      border-radius: 8px; padding: 1px 6px; margin-left: 6px; }
+    .insight-bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 2px; }
+    .insight-bar i { display: block; height: 100%; background: #1a56db; }
+    .insight-empty { font-size: 0.85rem; color: #64748b; }
+
     /* --- Phase 6: library view ------------------------------------------------ */
     #lib-totals { font-size: 0.85rem; font-weight: 600; background: #fff;
       border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px;
@@ -515,6 +544,7 @@
   <button class="tab" data-tab="brief" onclick="switchTab('brief')">Brief</button>
   <button class="tab" data-tab="chat" onclick="switchTab('chat')">Clinical Flight Bag</button>
   <button class="tab" data-tab="library" onclick="switchTab('library')">Library</button>
+  <button class="tab" data-tab="insights" onclick="switchTab('insights')">Ecosystem Insights</button>
 </nav>
 
 <main>
@@ -610,6 +640,14 @@
     </div>
     <div id="library"><div class="empty-state" style="flex:none;padding:20px 0"><p>Library</p></div></div>
   </section>
+  <section id="view-insights" hidden>
+    <div id="insight-head">
+      <span class="insight-title">Ecosystem Insights</span>
+      <span class="insight-sub">Clinician usage of the Clinical Flight Bag — what is asked, what helps, what is missing. Feeds protocol development, updating and governance (Track A → Track B loop).</span>
+    </div>
+    <div id="insight-tiles" class="brief-tiles"></div>
+    <div id="insight-content"></div>
+  </section>
 </main>
 
 <script>
@@ -689,7 +727,7 @@
     }
   }
 
-  function addMessage(role, content, sources) {
+  function addMessage(role, content, sources, queryId) {
     emptyState && emptyState.remove();
     const div = document.createElement('div');
     div.className = `msg ${role}`;
@@ -702,9 +740,69 @@
       ).join('');
       div.appendChild(s);
     }
+    if (role === 'bot' && queryId) addRatingRow(div, queryId);
     chatWindow.appendChild(div);
     chatWindow.scrollTop = chatWindow.scrollHeight;
     return div;
+  }
+
+  // --- Ecosystem Insights: per-answer rating (good / bad + 3-option tag) ----
+  const INSIGHT_TAGS = ['missing', 'wrong', 'unclear', 'other'];
+  function addRatingRow(msgDiv, queryId) {
+    const row = document.createElement('div');
+    row.className = 'msg-rating';
+    row.dataset.queryId = queryId;
+    const goodBtn = document.createElement('button');
+    goodBtn.textContent = '👍';
+    goodBtn.onclick = () => rateAnswer(queryId, 'good', row);
+    const badBtn = document.createElement('button');
+    badBtn.textContent = '👎';
+    badBtn.onclick = () => rateAnswer(queryId, 'bad', row);
+    const tags = document.createElement('span');
+    tags.className = 'tag-pick';
+    tags.hidden = true;
+    INSIGHT_TAGS.forEach(t => {
+      const b = document.createElement('button');
+      b.textContent = t;
+      b.onclick = () => {
+        tags.querySelectorAll('button').forEach(x => x.classList.remove('chosen'));
+        b.classList.add('chosen');
+        rateAnswer(queryId, 'bad', row);   // tag confirmed -> submit
+      };
+      tags.appendChild(b);
+    });
+    row.appendChild(goodBtn);
+    row.appendChild(badBtn);
+    row.appendChild(tags);
+    msgDiv.appendChild(row);
+  }
+  async function rateAnswer(queryId, rating, row) {
+    let tag = '';
+    const tags = row.querySelector('.tag-pick');
+    if (rating === 'bad') {
+      const chosen = tags.querySelector('button.chosen');
+      if (!chosen) {                      // first 👎: reveal the tag picker
+        tags.hidden = false;
+        row.querySelector('button').classList.add('chosen');
+        return;
+      }
+      tags.hidden = true;
+      tag = chosen.textContent;
+    }
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query_id: queryId, rating, tag }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      row.querySelectorAll('button').forEach(b => b.classList.remove('chosen'));
+      row.querySelector(rating === 'good' ? 'button:nth-child(1)' : 'button:nth-child(2)')
+        .classList.add('chosen');
+      if (rating === 'good') tags.hidden = true;
+    } catch (e) {
+      row.title = 'Feedback failed: ' + (e.message || 'network error');
+    }
   }
 
   async function sendMessage() {
@@ -739,7 +837,7 @@
       const data = await res.json();
       loading.remove();
       if (res.ok) {
-        addMessage('bot', escapeHtml(data.answer), data.sources);
+        addMessage('bot', escapeHtml(data.answer), data.sources, data.query_id);
       } else {
         addMessage('bot', `Error: ${data.detail || 'Unknown error'}`);
       }
@@ -860,6 +958,70 @@
         + escapeHtml(String(e.message || e)) + '</div>';
     }
   }
+
+  // --- Ecosystem Insights (free GET — file reads only) -----------------------
+  async function loadInsights() {
+    const tiles = document.getElementById('insight-tiles');
+    const body = document.getElementById('insight-content');
+    if (!tiles || !body) return;
+    tiles.innerHTML = '';
+    body.innerHTML = '<div class="insight-empty">Loading insights…</div>';
+    try {
+      const res = await fetch('/api/insights?days=30');
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'HTTP ' + res.status);
+      renderInsights(d);
+    } catch (e) {
+      body.innerHTML = '<div class="brief-error">Insights unavailable: '
+        + escapeHtml(String(e.message || e)) + '</div>';
+    }
+  }
+  function renderInsights(d) {
+    const t = d.totals;
+    const rated = t.rated || 0;
+    const goodPct = rated ? Math.round(100 * t.good / rated) : null;
+    const prov = Object.keys(d.by_provider || {}).length
+      ? Object.entries(d.by_provider).map(([k, n]) => k + ' ' + n).join(' · ') : '—';
+    const topCited = (d.most_cited && d.most_cited[0]) ? d.most_cited[0].source : '—';
+    const topCitedN = (d.most_cited && d.most_cited[0]) ? d.most_cited[0].count : 0;
+    document.getElementById('insight-tiles').innerHTML =
+      `<div class="tile"><div class="t">Queries (30d)</div><div class="v">${t.queries}</div>` +
+      `<div class="s">${prov}</div></div>` +
+      `<div class="tile ${goodPct === null ? '' : goodPct >= 70 ? 'good' : 'warn'}">` +
+      `<div class="t">Good rating</div><div class="v">${goodPct === null ? '—' : goodPct + '%'}</div>` +
+      `<div class="s">${rated} rated of ${t.queries}</div></div>` +
+      `<div class="tile ${t.flagged ? 'warn' : ''}"><div class="t">Gap-flagged</div>` +
+      `<div class="v">${t.flagged}</div><div class="s">flagged as missing / wrong / unclear</div></div>` +
+      `<div class="tile"><div class="t">Top cited</div><div class="v" style="font-size:0.85rem;line-height:1.3">${escapeHtml(topCited)}</div>` +
+      `<div class="s">${topCitedN} citations</div></div>`;
+
+    const empty = '<div class="insight-empty">No usage data yet — insights appear as clinicians start asking questions.</div>';
+    const rows = items => items.length
+      ? items.map(i => `<div class="insight-row"><span class="q">${i.html}</span><span class="n">${i.n}</span></div>`).join('')
+      : empty;
+
+    const topQ = (d.top_questions || []).map(q => ({
+      html: escapeHtml(q.question), n: q.count,
+    }));
+    const flagged = (d.gap_signals.flagged || []).map(g => ({
+      html: escapeHtml(g.question)
+        + (g.tag ? `<span class="insight-tag">${escapeHtml(g.tag)}</span>` : '')
+        + `<span class="n" style="margin-left:6px;font-size:0.7rem">${escapeHtml((g.ts || '').slice(0, 10))}</span>`,
+      n: '',
+    }));
+    const disclaimers = (d.gap_signals.disclaimer_questions || []).map(g => ({
+      html: escapeHtml(g.question), n: '“don\'t know”',
+    }));
+    const cited = (d.most_cited || []).map(c => ({
+      html: escapeHtml(c.source), n: c.count,
+    }));
+
+    document.getElementById('insight-content').innerHTML =
+      `<div class="insight-card"><h3>Top questions</h3>${rows(topQ)}</div>` +
+      `<div class="insight-card insight-gap"><h3>Gap signals — flagged by clinicians</h3>${rows(flagged)}</div>` +
+      `<div class="insight-card insight-gap"><h3>Gap signals — answered “I don't know”</h3>${rows(disclaimers)}</div>` +
+      `<div class="insight-card"><h3>Most cited sources</h3>${rows(cited)}</div>`;
+  }
   function renderLibrary(d) {
     const el = document.getElementById('library');
     const t = d.totals || {};
@@ -965,7 +1127,7 @@
   let brief = { status: 'none', data: null, generating: false };
   const SRC_CLASS = { 'NEA': 'nea', 'data.gov.sg': 'dgsg', 'CDA WIDB': 'widb', 'URA': 'ura' };
 
-  const TABS = ['brief', 'chat', 'library'];
+  const TABS = ['brief', 'chat', 'library', 'insights'];
   function currentTab() {
     const t = (location.hash || '').replace(/^#\//, '');
     return TABS.includes(t) ? t : 'brief';
@@ -974,6 +1136,7 @@
     document.getElementById('view-brief').hidden = tab !== 'brief';
     document.getElementById('view-chat').hidden = tab !== 'chat';
     document.getElementById('view-library').hidden = tab !== 'library';
+    document.getElementById('view-insights').hidden = tab !== 'insights';
     document.querySelectorAll('#tabs .tab').forEach(b =>
       b.classList.toggle('active', b.dataset.tab === tab));
     if (tab === 'brief') {
@@ -981,6 +1144,7 @@
       loadBrief();                       // free GET — never a POST (credit guard)
     }
     if (tab === 'library') loadLibrary();
+    if (tab === 'insights') loadInsights(); // free GET — file reads only
   }
   function switchTab(tab) {
     if (location.hash !== '#/' + tab) location.hash = '#/' + tab;

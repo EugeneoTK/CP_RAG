@@ -15,7 +15,8 @@ load_dotenv()
 
 from rag import (build_chain, ingest, ingest_append, load_vectorstore, CHROMA_DIR,
                  ingest_pdf, list_corpus, list_pdfs, MAX_PDF_BYTES, generate_brief,
-                 provider_info, set_provider, ingest_community_refresh)
+                 provider_info, set_provider, get_provider, ingest_community_refresh)
+from usage import log_chat, log_feedback, insights, FEEDBACK_TAGS
 from context.brief import format_brief_prompt
 from context.config import POSTCODE_DISTRICTS, TEST_CLINIC
 from context.snapshot import build_snapshot
@@ -149,6 +150,13 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[str]
+    query_id: str = ""
+
+
+class FeedbackRequest(BaseModel):
+    query_id: str
+    rating: str  # "good" | "bad"
+    tag: str = ""  # bad only: one of usage.FEEDBACK_TAGS
 
 
 @app.get("/")
@@ -176,7 +184,12 @@ async def chat(req: ChatRequest):
     # PDF chunks carry doc_title — show the guideline name, not the raw URL
     sources = list({(doc.metadata.get("doc_title") or doc.metadata.get("source", ""))
                     for doc in result["context"]})
-    return ChatResponse(answer=result["answer"], sources=sources)
+    # Ecosystem Insights: one JSONL line per turn — zero credits, never
+    # raises (a logging failure must not break the chat).
+    query_id = log_chat(
+        req.question, get_provider(), result["answer"], sources)
+    return ChatResponse(answer=result["answer"], sources=sources,
+                        query_id=query_id or "")
 
 
 @app.post("/api/ingest")
@@ -414,6 +427,36 @@ async def status():
     else:
         ctx = "not-built"
     return {"ready": rag_chain is not None, "context": ctx}
+
+
+# --- Ecosystem Insights (Track A usage layer) ------------------------------------
+# Append-only JSONL under usage/ (gitignored). Free endpoints: file reads
+# only — no LLM, no embeddings, 0 credits.
+
+@app.post("/api/feedback")
+async def feedback(req: FeedbackRequest):
+    """Clinician rating on one chat turn. Re-rating replaces the previous
+    rating (aggregation keeps the last per query_id)."""
+    if req.rating not in ("good", "bad"):
+        raise HTTPException(status_code=400, detail="rating must be 'good' or 'bad'")
+    tag = ""
+    if req.rating == "bad":
+        tag = req.tag.strip().lower()
+        if tag and tag not in FEEDBACK_TAGS:
+            raise HTTPException(
+                status_code=400,
+                detail="tag must be one of %s" % ", ".join(FEEDBACK_TAGS),
+            )
+    log_feedback(req.query_id, req.rating, tag or None)
+    return {"status": "ok"}
+
+
+@app.get("/api/insights")
+async def get_insights(days: int = 30):
+    """Aggregated usage: queries, ratings, gap signals, most-cited sources.
+    days is clamped to 1..365; a missing usage dir yields empty (ready) data."""
+    days = max(1, min(365, int(days)))
+    return insights(days=days)
 
 
 # --- chat-model provider switch (UI header toggle) ----------------------------------
