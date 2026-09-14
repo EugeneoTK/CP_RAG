@@ -24,11 +24,14 @@ _SYSTEM = (
     "Protocol relevance is rendered separately from structured data.\n"
     "3. A URA written permission is NOT an opened facility — never present "
     "one as an existing service.\n"
-    "4. Reflect data_gaps: name the affected area in outlook or the relevant "
+    "4. air.psi_peak is the 24-HOUR PSI (NEA/MOH scale: >101 Unhealthy, "
+    ">201 Very Unhealthy); air.pm25_peak is the 1-hourly µg/m³. Say which "
+    "window you mean when citing either.\n"
+    "5. Reflect data_gaps: name the affected area in outlook or the relevant "
     "watch item (\"unavailable this cycle\").\n"
-    "5. If nothing is elevated, say so plainly — a calm week is a valid "
+    "6. If nothing is elevated, say so plainly — a calm week is a valid "
     "headline. Do not manufacture urgency.\n"
-    "6. Output STRICT JSON only — no markdown fences, no commentary: "
+    "7. Output STRICT JSON only — no markdown fences, no commentary: "
     "{\"headline\": string (max 25 words), \"watch\": [{\"finding\": max 25 "
     "words, \"why_it_matters\": max 30 words, \"action\": max 30 words, "
     "\"source\": one of NEA | data.gov.sg | CDA WIDB | URA | derived}] (max 6 "
@@ -60,7 +63,10 @@ def _project(snapshot, corpus_stats):
                    if clinic.get(k) is not None},
         "generated_at": meta.get("generated_at"),
         "air": {"psi_peak": psi.get("peak"),
+                "psi_basis": psi.get("basis"),  # metric the peak came from (24-hourly)
                 "psi_peak_region": psi.get("peak_region"),
+                "pm25_peak": pm.get("peak"),
+                "pm25_basis": pm.get("basis"),
                 "pm25_national": pm.get("national")},
         "weather": {"today_date": today.get("date"),
                     "today_high_c": today.get("high_c"),

@@ -20,8 +20,26 @@ def _headers():
     return h
 
 
+# The psi/pm25 feeds carry ONE item with MANY metrics (per-region dicts).
+# The official public figures are the 24-HOURLY ones (they match the PSI
+# descriptor table NEA/MOH use: 24-hr PSI >101 = Unhealthy). The spot
+# sub-indexes (e.g. psi_sub_index) are the raw station contributions and are
+# often null. Picking "the first dict" (the old behaviour) silently grabbed
+# co_sub_index — the app reported "PSI 8, Good" while the 24-hr PSI was 153
+# (2026-09-15 bug). Order matters: first key present with real values wins.
+READING_KEYS = {
+    # psi feed: the official public figure is the 24-hourly PSI (matches the
+    # NEA/MOH descriptor table); psi_sub_index (spot) as fallback.
+    "psi": ("psi_twenty_four_hourly", "psi_sub_index"),
+    # pm25 feed: carries the 1-HOURLY concentration only (labelled as such in
+    # the UI). pm25_sub_index is a PSI contribution INDEX, never a µg/m³.
+    "pm25": ("pm25_one_hourly",),
+}
+
+
 def fetch_nea_reading(slug_key):
-    """pm25 / psi: data.items[-1].readings.{metric} per region."""
+    """pm25 / psi: official per-region reading (24-hourly metric preferred;
+    see READING_KEYS). Returns the metric key actually used in `basis`."""
     url = config.RT_ENDPOINTS[slug_key]
     doc = get_json(url, extra_headers=_headers())
     data = doc.get("data") or {}
@@ -30,16 +48,18 @@ def fetch_nea_reading(slug_key):
         return None, "no items in response"
     latest = items[-1]
     readings = latest.get("readings") or {}
-    metric = None
-    for v in readings.values():
-        if isinstance(v, dict):
-            metric = v
+    metric, used = None, None
+    for key in READING_KEYS[slug_key]:
+        v = readings.get(key)
+        if isinstance(v, dict) and any(isinstance(x, (int, float)) for x in v.values()):
+            metric, used = v, key
             break
     if metric is None:
         return None, "no readings in latest item"
     return {
         "regions": {k: v for k, v in metric.items() if isinstance(v, (int, float))},
         "national": metric.get("national"),
+        "basis": used,
         "timestamp": latest.get("timestamp"),
         "updated": latest.get("updatedTimestamp"),
     }, None

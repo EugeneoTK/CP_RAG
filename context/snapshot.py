@@ -156,6 +156,7 @@ def build_snapshot(lat, lon, name, use_cache=True):
             "peak": peak,
             "peak_region": max(regions, key=regions.get) if regions else None,
             "national": val.get("national"),
+            "basis": val.get("basis"),
             "updated": val.get("updated"),
         }
         peaks[label] = peak

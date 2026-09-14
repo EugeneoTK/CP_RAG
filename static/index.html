@@ -783,7 +783,7 @@
       const chosen = tags.querySelector('button.chosen');
       if (!chosen) {                      // first 👎: reveal the tag picker
         tags.hidden = false;
-        row.querySelector('button').classList.add('chosen');
+        row.querySelector('button:nth-child(2)').classList.add('chosen');
         return;
       }
       tags.hidden = true;
@@ -1195,8 +1195,8 @@
 
     // --- one-line chips ---
     const chips = [];
-    if (pm && pm.peak != null) chips.push(chipHtml('PM2.5', pm.peak.toFixed(0) + ' ' + (pm.peak_region || ''), pm25Cls(pm.peak)));
-    if (psi && psi.peak != null) chips.push(chipHtml('PSI', String(psi.peak), psiCls(psi.peak)));
+    if (pm && pm.peak != null) chips.push(chipHtml('PM2.5 (1h)', pm.peak.toFixed(0) + ' ' + (pm.peak_region || ''), pm25Cls(pm.peak)));
+    if (psi && psi.peak != null) chips.push(chipHtml('PSI (24h)', String(psi.peak), psiCls(psi.peak)));
     if (wb && wb.max_wbgt_c != null) chips.push(chipHtml('WBGT', wb.max_wbgt_c.toFixed(1) + '°C ' + (wb.max_heat_stress || ''), heatCls(wb.max_heat_stress)));
     const rainy = days.filter(x => x.text && /thunder|shower/i.test(x.text)).map(x => x.day || '');
     if (rainy.length) chips.push(chipHtml('Rain', rainy.join(', '), 'info'));
@@ -1224,7 +1224,7 @@
     // --- detail cards ---
     let airHtml = '<h3>Air quality</h3>';
     if (pm) {
-      airHtml += `<div class="row"><strong>PM2.5</strong> peak ${pm.peak} µg/m³ (${escapeHtml(pm.peak_region || '?')}) · national ${pm.national != null ? pm.national : '—'}</div>`;
+      airHtml += `<div class="row"><strong>PM2.5 (1-hr)</strong> peak ${pm.peak} µg/m³ (${escapeHtml(pm.peak_region || '?')}) · national ${pm.national != null ? pm.national : '—'}</div>`;
       airHtml += Object.entries(pm.regions || {}).map(([r, v]) =>
         `<div class="row dim">${escapeHtml(r)}: ${v}</div>`).join('');
       airHtml += `<div class="row dim">updated ${escapeHtml((pm.updated || '').slice(11, 16) || '?')}</div>`;
@@ -1381,7 +1381,7 @@
       const cls = aq.psi.peak > 100 ? 'bad' : (aq.psi.peak >= 51 ? 'warn' : 'good');
       const sub = (aq.psi.peak_region || '')
         + ((aq.pm25 && aq.pm25.peak != null) ? ' · PM2.5 ' + aq.pm25.peak.toFixed(0) : '');
-      tiles += tileHtml('Air (PSI)', cls, String(aq.psi.peak), escapeHtml(sub));
+      tiles += tileHtml('Air (PSI 24h)', cls, String(aq.psi.peak), escapeHtml(sub));
     } else tiles += tileHtml('Air', '', 'no signal', 'PSI unavailable');
     // Weather — warn if a flood alert is present, else good
     const wGap = gap(['forecast_24hr', 'wbgt', 'flood_alerts', 'outlook_4day']);
