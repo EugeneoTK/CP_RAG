@@ -24,9 +24,11 @@ _SYSTEM = (
     "Protocol relevance is rendered separately from structured data.\n"
     "3. A URA written permission is NOT an opened facility — never present "
     "one as an existing service.\n"
-    "4. air.psi_peak is the 24-HOUR PSI (NEA/MOH scale: >101 Unhealthy, "
-    ">201 Very Unhealthy); air.pm25_peak is the 1-hourly µg/m³. Say which "
-    "window you mean when citing either.\n"
+    "4. air.*_clinic_value is THIS clinic's NEA region (the patients' "
+    "air — primary); air.*_island_peak is the worst region island-wide "
+    "(context only). PSI is the 24-HOUR value (NEA/MOH scale: >101 "
+    "Unhealthy, >201 Very Unhealthy); PM2.5 is 1-hourly µg/m³. Say "
+    "which region and which window you mean when citing either.\n"
     "5. Reflect data_gaps: name the affected area in outlook or the relevant "
     "watch item (\"unavailable this cycle\").\n"
     "6. If nothing is elevated, say so plainly — a calm week is a valid "
@@ -62,10 +64,13 @@ def _project(snapshot, corpus_stats):
                    ("name", "lat", "lon", "nea_region_approx", "town")
                    if clinic.get(k) is not None},
         "generated_at": meta.get("generated_at"),
-        "air": {"psi_peak": psi.get("peak"),
-                "psi_basis": psi.get("basis"),  # metric the peak came from (24-hourly)
-                "psi_peak_region": psi.get("peak_region"),
-                "pm25_peak": pm.get("peak"),
+        "air": {"psi_clinic_region": psi.get("clinic_region"),
+                "psi_clinic_value": psi.get("clinic_value"),  # THIS clinic's region (primary)
+                "psi_island_peak": psi.get("peak"),
+                "psi_island_peak_region": psi.get("peak_region"),
+                "psi_basis": psi.get("basis"),  # metric the value came from (24-hourly)
+                "pm25_clinic_value": pm.get("clinic_value"),
+                "pm25_island_peak": pm.get("peak"),
                 "pm25_basis": pm.get("basis"),
                 "pm25_national": pm.get("national")},
         "weather": {"today_date": today.get("date"),

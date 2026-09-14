@@ -193,10 +193,13 @@ _RULES = [
 
 
 def build_protocol_links(air, weather, dengue):
-    """air: {pm25_peak, psi_peak}; weather/dengue: snapshot blocks.
-    Returns (links, brief_lines)."""
+    """air: {pm25_peak, psi_peak, pm25_island_peak, psi_island_peak,
+    clinic_region}; weather/dengue: snapshot blocks. The *_peak values are
+    the CLINIC's NEA region (patient-facing trigger); island peaks are
+    secondary detail. Returns (links, brief_lines)."""
     links = []
     brief = []
+    region = air.get("clinic_region") or "clinic"
 
     def add(rule_key, detail):
         for r in _RULES:
@@ -218,17 +221,24 @@ def build_protocol_links(air, weather, dengue):
                 brief.append("- " + detail + (" (" + "; ".join(parts) + ")"))
                 break
 
+    def _island_ctx(clinic_v, island_v):
+        if island_v is not None and island_v > clinic_v:
+            return " (island peak %.0f elsewhere)" % island_v
+        return ""
+
     pm25_peak = air.get("pm25_peak")
     if pm25_peak is not None and pm25_peak >= 25:
-        add("pm25", "peak regional PM2.5 %.0f ug/m3 (unhealthy for sensitive groups)"
-            % pm25_peak)
+        add("pm25", "%s PM2.5 %.0f ug/m3 (unhealthy for sensitive groups)%s"
+            % (region, pm25_peak, _island_ctx(pm25_peak, air.get("pm25_island_peak"))))
     elif pm25_peak is not None and pm25_peak >= 15:
-        add("pm25", "peak regional PM2.5 %.0f ug/m3 (moderate)" % pm25_peak)
+        add("pm25", "%s PM2.5 %.0f ug/m3 (moderate)%s"
+            % (region, pm25_peak, _island_ctx(pm25_peak, air.get("pm25_island_peak"))))
 
     psi_peak = air.get("psi_peak")
     if psi_peak is not None and psi_peak >= 101:
         band = "very unhealthy" if psi_peak >= 201 else "unhealthy"
-        add("psi", "peak regional PSI %.0f (%s)" % (psi_peak, band))
+        add("psi", "%s 24-hr PSI %.0f (%s)%s"
+            % (region, psi_peak, band, _island_ctx(psi_peak, air.get("psi_island_peak"))))
 
     wbgt = (weather or {}).get("wbgt") or {}
     max_w = wbgt.get("max_wbgt_c")

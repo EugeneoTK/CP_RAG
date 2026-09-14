@@ -142,7 +142,12 @@ def build_snapshot(lat, lon, name, use_cache=True):
     }
 
     # --- air quality ---------------------------------------------------------------
+    # The clinic brief is for THIS clinic's patients: the clinic's own NEA
+    # region is primary; the island-wide peak is kept as secondary context
+    # (they diverge on uneven haze days — e.g. central 153 vs west 127).
+    clinic_region = config.nea_region(lat, lon)
     peaks = {}
+    clinic_vals = {}
     for label in ("pm25", "psi"):
         val, err = fetchers.fetch_nea_reading(label)
         time.sleep(2)
@@ -155,11 +160,14 @@ def build_snapshot(lat, lon, name, use_cache=True):
             "regions": regions,
             "peak": peak,
             "peak_region": max(regions, key=regions.get) if regions else None,
+            "clinic_region": clinic_region,
+            "clinic_value": regions.get(clinic_region),
             "national": val.get("national"),
             "basis": val.get("basis"),
             "updated": val.get("updated"),
         }
         peaks[label] = peak
+        clinic_vals[label] = regions.get(clinic_region) if regions else None
 
     # --- weather ---------------------------------------------------------------------
     val, err = fetchers.fetch_forecast_24hr()
@@ -266,8 +274,12 @@ def build_snapshot(lat, lon, name, use_cache=True):
         snap["nearest_services"] = {"polyclinics": pcs}
 
     # --- protocol linkage (the differentiator) ------------------------------------------
+    # Trigger on the CLINIC's region (its patients breathe that air); the
+    # island peak rides along as context in the detail line.
     links, brief = build_protocol_links(
-        {"pm25_peak": peaks.get("pm25"), "psi_peak": peaks.get("psi")},
+        {"pm25_peak": clinic_vals.get("pm25"), "psi_peak": clinic_vals.get("psi"),
+         "pm25_island_peak": peaks.get("pm25"), "psi_island_peak": peaks.get("psi"),
+         "clinic_region": clinic_region},
         snap["weather"], snap["dengue"])
     snap["protocol_links"] = {
         "corpus": PROTOCOLS,
