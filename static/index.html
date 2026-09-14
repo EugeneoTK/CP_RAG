@@ -23,11 +23,18 @@
       width: 100%;
       background: #1a56db;
       color: #fff;
-      padding: 14px 24px;
+      padding: 14px 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    /* inner container so the header's left edge aligns with the centred
+       body column (both max-width:800px, margin:auto). */
+    .header-inner {
+      max-width: 800px;
+      margin: 0 auto;
       display: flex;
       align-items: center;
       gap: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     }
 
     header h1 { font-size: 1.1rem; font-weight: 600; }
@@ -450,15 +457,23 @@
     .brief-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
       border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; }
 
-    .brief-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    /* 3 columns: the 6 Brief tiles fill two clean rows (4 cols left a
+       half-empty 2nd row; 2 cols made the dense sub-text wrap too wide). */
+    .brief-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .tile { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
-      padding: 10px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-top: 3px solid #94a3b8; }
+      padding: 10px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-top: 3px solid #94a3b8;
+      display: flex; flex-direction: column; }
     .tile.good { border-top-color: #16a34a; }
     .tile.warn { border-top-color: #d97706; }
     .tile.bad  { border-top-color: #dc2626; }
     .tile .t { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
     .tile .v { font-size: 1.05rem; font-weight: 600; margin-top: 2px; }
-    .tile .s { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+    /* sub-line clamped to 3 lines — long lists (URA categories, nearby
+       clusters) overflow into the raw-context drill-down, not the tile.
+       The title attribute carries the full text on hover. */
+    .tile .s { font-size: 0.72rem; color: #64748b; margin-top: auto; padding-top: 4px;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    @media (max-width: 640px) { .brief-tiles { grid-template-columns: 1fr 1fr; } }
 
     .brief-headline { font-size: 1.25rem; font-weight: 600; line-height: 1.4; }
     .brief-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
@@ -529,15 +544,17 @@
 <body>
 
 <header>
-  <div>
-    <h1>Care Protocol Assistant</h1>
-    <p>Powered by HSG Primary Care Pages</p>
+  <div class="header-inner">
+    <div>
+      <h1>Care Protocol Assistant</h1>
+      <p>Powered by HSG Primary Care Pages</p>
+    </div>
+    <div id="provider-switch" title="Chat model: OpenRouter (cloud) or the local vLLM server. Embeddings always use OpenRouter — they must match the stored index.">
+      <button class="prov-btn" data-provider="openrouter" onclick="switchProvider('openrouter')">OpenRouter</button>
+      <button class="prov-btn" data-provider="local" onclick="switchProvider('local')">Local LLM</button>
+    </div>
+    <span id="status-badge">Checking...</span>
   </div>
-  <div id="provider-switch" title="Chat model: OpenRouter (cloud) or the local vLLM server. Embeddings always use OpenRouter — they must match the stored index.">
-    <button class="prov-btn" data-provider="openrouter" onclick="switchProvider('openrouter')">OpenRouter</button>
-    <button class="prov-btn" data-provider="local" onclick="switchProvider('local')">Local LLM</button>
-  </div>
-  <span id="status-badge">Checking...</span>
 </header>
 
 <nav id="tabs">
@@ -1365,8 +1382,11 @@
     return (snap.data_gaps || []).find(g => prefixes.some(p => g.startsWith(p)));
   }
   function tileHtml(title, cls, value, sub) {
+    // title attr carries the full sub-line (the CSS clamps it to 3 lines)
     return `<div class="tile ${cls}"><div class="t">${title}</div>`
-      + `<div class="v">${value}</div><div class="s">${sub || ''}</div></div>`;
+      + `<div class="v">${value}</div>`
+      + (sub ? `<div class="s" title="${sub}">${sub}</div>` : '<div class="s"></div>')
+      + `</div>`;
   }
   function renderBriefTiles(snap) {
     const el = document.getElementById('brief-tiles');
