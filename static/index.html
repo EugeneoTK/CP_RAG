@@ -414,7 +414,7 @@
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
-      margin-top: 10px;
+      margin-top: 14px;
       font-size: 0.78rem;
       color: #475569;
     }
@@ -445,10 +445,16 @@
     #view-brief, #view-library { overflow-y: auto; gap: 12px; }
     #view-chat { overflow: hidden; }
 
-    #brief-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-    #brief-title { font-size: 1.05rem; font-weight: 600; }
+    /* brief header block: title / clinic picker / action — explicit
+       vertical rhythm (previously the rows stacked tight, the Generate
+       button touched the clinic inputs). */
+    #brief-head { display: flex; flex-direction: column; }
+    #brief-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+      padding: 14px 0 4px; }
+    #brief-title { font-size: 1.15rem; font-weight: 600; }
     #brief-stamp { font-size: 0.72rem; color: #64748b; }
-    #brief-cta-row { display: flex; align-items: center; gap: 10px; }
+    #brief-cta-row { display: flex; align-items: center; gap: 10px;
+      margin-top: 16px; }
     #brief-generate { padding: 8px 14px; font-size: 0.85rem; font-weight: 600;
       background: #1a56db; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
     #brief-generate:hover { background: #1e40af; }
