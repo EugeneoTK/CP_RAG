@@ -85,8 +85,8 @@ air block + `context/linkage.py`), WIDB, URA planning, NTUC Active Ageing.
 UI: four hash-routed tabs — Brief (default) / Clinical Flight Bag (chat,
 with rating buttons) / Library / **Ecosystem Insights** (usage JSONL under
 `usage/`, gitignored). CHAT LLM runtime-switchable: `openrouter` (paid) /
-`local` vLLM. All committed + pushed: **HEAD = origin/main = `c8fe1ff`,
-working tree clean.** Do next: **decide the app naming with the user
+`local` vLLM. All committed + pushed: **HEAD = origin/main = `527556b`
+(handoff), working tree clean.** Do next: **decide the app naming with the user
 (Outstanding #1)**; then optionally the bare-URL answer fix (#2) or pin
 `CHAT_PROVIDER` (#3). Golden rules in `CLAUDE.md` (read it first). IMDA
 meeting context: this app is the Track A "GP e-Protocol Bag" prototype for
