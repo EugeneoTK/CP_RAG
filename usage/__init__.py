@@ -73,7 +73,7 @@ def log_feedback(query_id, rating, tag=None):
 
 def _iter_events(days):
     today = datetime.now().astimezone().date()
-    for i in range(days, -1, -1):
+    for i in range(days - 1, -1, -1):
         p = _daily_file(today - timedelta(days=i))
         if not p.exists():
             continue
