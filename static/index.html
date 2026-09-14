@@ -474,6 +474,9 @@
     .tile .s { font-size: 0.72rem; color: #64748b; margin-top: auto; padding-top: 4px;
       display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     @media (max-width: 640px) { .brief-tiles { grid-template-columns: 1fr 1fr; } }
+    /* the 4 insight tiles form one row (they're short — no clamp needed) */
+    #insight-tiles { grid-template-columns: repeat(4, 1fr); }
+    @media (max-width: 640px) { #insight-tiles { grid-template-columns: 1fr 1fr; } }
 
     .brief-headline { font-size: 1.25rem; font-weight: 600; line-height: 1.4; }
     .brief-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
